@@ -10,7 +10,7 @@ celery = Celery(
     "trend_radar",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=[],  # таски підключаються разом із пайплайном
+    include=["app.tasks.pipeline"],
 )
 
 celery.conf.update(
