@@ -1,0 +1,129 @@
+"""Тести Boost Score — ядра вимоги ТЗ про Internal Sales Boost.
+
+Алгоритм детермінований, тож перевіряється повністю: без БД, без моків.
+"""
+
+import pytest
+
+from app.services.boost_service import (
+    CATEGORY_MATCH_POINTS,
+    KEYWORD_MATCH_POINTS,
+    MAX_BOOST,
+    MAX_KEYWORD_POINTS,
+    PastEntry,
+    calculate_boost,
+)
+
+
+@pytest.fixture
+def yoga_mat():
+    return PastEntry(title="Yoga Mat Pro", category="Sports", keywords=["yoga", "mat"])
+
+
+class TestNoMatch:
+    def test_empty_history_gives_zero(self):
+        result = calculate_boost(title="Echo Dot", category="Electronics", past=[])
+        assert result.score == 0
+        assert result.matched_titles == []
+
+    def test_unrelated_product_gives_zero(self, yoga_mat):
+        result = calculate_boost(
+            title="Apple MacBook Air Laptop", category="Computers", past=[yoga_mat]
+        )
+        assert result.score == 0
+        assert result.matched_category is None
+
+
+class TestCategoryMatch:
+    def test_exact_category_match(self, yoga_mat):
+        result = calculate_boost(title="Dumbbell Rack", category="Sports", past=[yoga_mat])
+        assert result.score == CATEGORY_MATCH_POINTS
+        assert result.matched_category == "Sports"
+
+    def test_partial_category_match(self, yoga_mat):
+        """Amazon віддає 'Best Sellers in Sports', у нашій історії просто 'Sports'."""
+        result = calculate_boost(
+            title="Dumbbell Rack", category="Best Sellers in Sports", past=[yoga_mat]
+        )
+        assert result.score == CATEGORY_MATCH_POINTS
+
+    def test_category_match_is_case_insensitive(self, yoga_mat):
+        result = calculate_boost(title="Dumbbell Rack", category="SPORTS", past=[yoga_mat])
+        assert result.score == CATEGORY_MATCH_POINTS
+
+
+class TestKeywordMatch:
+    def test_single_keyword(self, yoga_mat):
+        result = calculate_boost(
+            title="Foldable Yoga Block", category="Fitness", past=[yoga_mat]
+        )
+        assert result.score == KEYWORD_MATCH_POINTS
+        assert result.matched_keywords == ["yoga"]
+
+    def test_two_keywords(self, yoga_mat):
+        result = calculate_boost(
+            title="Non-slip Yoga Mat for Home", category="Fitness", past=[yoga_mat]
+        )
+        assert result.score == 2 * KEYWORD_MATCH_POINTS
+        assert result.matched_keywords == ["mat", "yoga"]
+
+    def test_keyword_points_are_capped(self):
+        """Багато спільних слів не мають давати нескінченний бал."""
+        entry = PastEntry(
+            title="x",
+            category="Other",
+            keywords=["yoga", "mat", "block", "strap", "wheel", "towel"],
+        )
+        result = calculate_boost(
+            title="Yoga Mat Block Strap Wheel Towel", category="Fitness", past=[entry]
+        )
+        assert result.score == MAX_KEYWORD_POINTS
+
+    def test_keywords_derived_from_title_when_empty(self):
+        """Минулий товар без keywords усе одно має знаходитись — слова беруться
+        з його назви, інакше запис був би марним."""
+        entry = PastEntry(title="Air Fryer Basket", category="Other", keywords=[])
+        result = calculate_boost(title="Ninja Air Fryer", category="Kitchen", past=[entry])
+        assert result.score > 0
+        assert "fryer" in result.matched_keywords
+
+
+class TestCombined:
+    def test_category_and_keywords_add_up(self, yoga_mat):
+        result = calculate_boost(
+            title="Non-slip Yoga Mat", category="Sports", past=[yoga_mat]
+        )
+        assert result.score == CATEGORY_MATCH_POINTS + 2 * KEYWORD_MATCH_POINTS
+
+    def test_total_is_capped(self):
+        entry = PastEntry(
+            title="x",
+            category="Sports",
+            keywords=["yoga", "mat", "block", "strap", "wheel"],
+        )
+        result = calculate_boost(
+            title="Yoga Mat Block Strap Wheel", category="Sports", past=[entry]
+        )
+        assert result.score == MAX_BOOST
+
+    def test_points_counted_once_across_many_past_products(self):
+        """Десять наших хітів в одній категорії не роблять товар у десять разів
+        перспективнішим — бал за категорію нараховується один раз."""
+        history = [
+            PastEntry(title=f"Item {i}", category="Sports", keywords=[]) for i in range(10)
+        ]
+        result = calculate_boost(title="Dumbbell Rack", category="Sports", past=history)
+        assert result.score == CATEGORY_MATCH_POINTS
+        assert len(result.matched_titles) == 10
+
+
+class TestExplain:
+    def test_explains_no_match(self):
+        assert "не знайдено" in calculate_boost(title="X", category="Y", past=[]).explain()
+
+    def test_explains_match(self, yoga_mat):
+        text = calculate_boost(
+            title="Non-slip Yoga Mat", category="Sports", past=[yoga_mat]
+        ).explain()
+        assert "Boost +22" in text
+        assert "Yoga Mat Pro" in text
