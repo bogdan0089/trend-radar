@@ -1,0 +1,118 @@
+<!doctype html>
+<!--
+  Фікстура для тестів парсера. Повторює реальну розмітку Amazon Best Sellers
+  (zgbs), включно з хешованими класами виду _cDEzb_p13n-sc-price_3mJ9Z.
+
+  Спеціально містить крайні випадки:
+    #1 повний товар
+    #2 без ціни ("See price in cart")
+    #3 без рейтингу і відгуків (новинка)
+    #4 дубль ASIN товару #1 — перевіряє дедуплікацію
+    #5 ціна з комою (1,299.00), рейтинг тільки через клас a-star-*
+    #6 без ASIN у посиланні — має бути пропущений
+-->
+<html lang="en">
+<head><title>Amazon Best Sellers: Best Electronics</title></head>
+<body>
+<h1 class="a-size-large">Best Sellers in Electronics</h1>
+
+<div class="p13n-desktop-grid">
+
+  <!-- #1 повний товар -->
+  <div id="gridItemRoot" class="a-column a-span12 _cDEzb_grid-cell_1uMOS">
+    <div class="zg-grid-general-faceout">
+      <div class="p13n-sc-uncoverable-faceout" id="B08N5WRWNW">
+        <a class="a-link-normal" href="/Echo-Dot-4th-Gen/dp/B08N5WRWNW/ref=zg_bs_g_1">
+          <img alt="Echo Dot (4th Gen) | Smart speaker with Alexa | Charcoal"
+               src="https://m.media-amazon.com/images/I/714Rq4k05UL._AC_UL300_.jpg"
+               class="a-dynamic-image">
+        </a>
+        <div class="a-icon-row">
+          <a class="a-link-normal" title="4.7 out of 5 stars" href="/product-reviews/B08N5WRWNW/">
+            <i class="a-icon a-icon-star-small a-star-small-4-5">
+              <span class="a-icon-alt">4.7 out of 5 stars</span>
+            </i>
+          </a>
+          <span class="a-size-small">552,341</span>
+        </div>
+        <div class="a-row">
+          <span class="_cDEzb_p13n-sc-price_3mJ9Z">$49.99</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- #2 без ціни -->
+  <div id="gridItemRoot" class="a-column a-span12">
+    <div class="p13n-sc-uncoverable-faceout" id="B09B8V1LZ3">
+      <a class="a-link-normal" href="/Fire-TV-Stick/dp/B09B8V1LZ3/ref=zg_bs_g_2">
+        <img alt="Fire TV Stick 4K streaming device"
+             src="https://m.media-amazon.com/images/I/51TjJOTfslL._AC_UL300_.jpg">
+      </a>
+      <div class="a-icon-row">
+        <a class="a-link-normal" title="4.5 out of 5 stars" href="/product-reviews/B09B8V1LZ3/">
+          <i class="a-icon a-star-small-4-5"><span class="a-icon-alt">4.5 out of 5 stars</span></i>
+        </a>
+        <span class="a-size-small">88,102</span>
+      </div>
+      <div class="a-row">
+        <span class="a-color-secondary">See price in cart</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- #3 новинка: без рейтингу і відгуків -->
+  <div id="gridItemRoot" class="a-column a-span12">
+    <div class="p13n-sc-uncoverable-faceout" id="B0CHX3QBCH">
+      <a class="a-link-normal" href="/Anker-Charger/dp/B0CHX3QBCH/ref=zg_bs_g_3">
+        <img alt="Anker 45W USB-C Charger, Compact Fast Charger"
+             src="https://m.media-amazon.com/images/I/61mQpZ9pTiL._AC_UL300_.jpg">
+      </a>
+      <div class="a-row">
+        <span class="_cDEzb_p13n-sc-price_3mJ9Z">$22.99</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- #4 дубль #1 — Amazon показує той самий товар у двох блоках -->
+  <div id="gridItemRoot" class="a-column a-span12">
+    <div class="p13n-sc-uncoverable-faceout" id="B08N5WRWNW">
+      <a class="a-link-normal" href="/Echo-Dot-4th-Gen/dp/B08N5WRWNW/ref=zg_bs_g_4">
+        <img alt="Echo Dot (4th Gen) | Smart speaker with Alexa | Charcoal"
+             src="https://m.media-amazon.com/images/I/714Rq4k05UL._AC_UL300_.jpg">
+      </a>
+      <div class="a-row">
+        <span class="_cDEzb_p13n-sc-price_3mJ9Z">$49.99</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- #5 ціна з комою, рейтинг лише через клас іконки -->
+  <div id="gridItemRoot" class="a-column a-span12">
+    <div class="p13n-sc-uncoverable-faceout" id="B0BSHF7WHW">
+      <a class="a-link-normal" href="/Apple-MacBook-Air/dp/B0BSHF7WHW/ref=zg_bs_g_5">
+        <img alt="Apple MacBook Air Laptop M2 chip, 13.6-inch"
+             src="https://m.media-amazon.com/images/I/71f5Eu5lJSL._AC_UL300_.jpg">
+      </a>
+      <div class="a-icon-row">
+        <i class="a-icon a-icon-star-small a-star-small-4"></i>
+        <span class="a-size-small">4,208</span>
+      </div>
+      <div class="a-row">
+        <span class="_cDEzb_p13n-sc-price_3mJ9Z">$1,299.00</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- #6 битий блок: посилання без ASIN — має бути пропущений -->
+  <div id="gridItemRoot" class="a-column a-span12">
+    <div class="p13n-sc-uncoverable-faceout">
+      <a class="a-link-normal" href="/gp/bestsellers/electronics/ref=zg_bs_nav">
+        <img alt="See more Electronics" src="https://m.media-amazon.com/images/I/nav.jpg">
+      </a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
