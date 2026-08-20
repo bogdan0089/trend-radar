@@ -1,15 +1,15 @@
-# Контекст збірки — корінь репозиторію, тож сюди інакше поїде і фронтенд,
-# і .git, і віртуалка. Без цього файлу контекст роздувається до гігабайтів
-# і кожна збірка чекає, поки вони заллються в демон.
+# The build context is the repository root, so without this file the frontend,
+# .git and the virtualenv would all be shipped to the daemon and every build
+# would wait on gigabytes of upload.
 
 .git/
 .gitignore
 .gitattributes
 
-# Секрети в образ не потрапляють ніколи
+# Secrets never reach the image
 .env
 
-# Фронтенд збирається власним Dockerfile
+# The frontend has its own Dockerfile
 frontend/
 node_modules/
 dist/

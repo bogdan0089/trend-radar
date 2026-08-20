@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# A new push supersedes the previous run on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '22'
+
+jobs:
+  backend:
+    name: Lint and tests
+    runs-on: ubuntu-latest
+
+    # Real Postgres and Redis, not stand-ins: the code relies on JSONB, ARRAY
+    # and DISTINCT ON, so SQLite would test a different application.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: trend
+          POSTGRES_PASSWORD: trend
+          POSTGRES_DB: trend_radar
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U trend -d trend_radar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      TEST_DATABASE_HOST_URL: postgresql+psycopg://trend:trend@localhost:5432
+      # Without this the database tests skip when Postgres is unreachable, and a
+      # green run would mean nothing.
+      REQUIRE_TEST_DB: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Tests
+        run: pytest -q
+
+  migrations:
+    name: Migrations and seed
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: trend
+          POSTGRES_PASSWORD: trend
+          POSTGRES_DB: trend_radar
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U trend -d trend_radar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations to an empty database
+        run: alembic upgrade head
+
+      - name: Models and migrations agree
+        # Fails when a model changed without a matching migration, which would
+        # otherwise only surface as a broken query in production.
+        run: alembic check
+
+      - name: Downgrade and re-apply
+        # Proves the downgrade path is real rather than an empty stub.
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Seed twice, it must be idempotent
+        # The entrypoint seeds on every container start, so a second run has to
+        # be a no-op instead of duplicating the admin or the demo products.
+        run: |
+          python -m app.seed
+          python -m app.seed
+
+      - name: Check what the seed left behind
+        run: python scripts/check_seed.py
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+  stack:
+    name: Docker Compose smoke test
+    runs-on: ubuntu-latest
+    # The heavy job: it builds the Playwright image. Only worth running once the
+    # cheap checks are green.
+    needs: [backend, migrations, frontend]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the stack exactly as the README says
+        run: |
+          cp .env.example .env
+          docker compose up --build -d
+
+      - name: Wait for the API to become healthy
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8011/api/health > /dev/null; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the API never became healthy"
+          docker compose ps
+          docker compose logs --tail 200
+          exit 1
+
+      - name: Smoke test
+        run: ./scripts/smoke.sh
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

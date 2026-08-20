@@ -1,4 +1,4 @@
-# Проєкт повністю ізольований: власне ім'я, власні volume'и, нестандартні порти.
+# Fully isolated project: own name, own volumes, non-default host ports.
 name: trend-radar
 
 x-backend-env: &backend-env
@@ -18,12 +18,13 @@ x-backend-env: &backend-env
   LLM_API_KEY: ${LLM_API_KEY:-}
   LLM_MODEL: ${LLM_MODEL:-}
   LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
-  AMAZON_CATEGORY_URL: ${AMAZON_CATEGORY_URL:-https://www.amazon.com/Best-Sellers/zgbs}
-  SCRAPE_MAX_PRODUCTS: ${SCRAPE_MAX_PRODUCTS:-20}
+  AMAZON_CATEGORY_URLS: ${AMAZON_CATEGORY_URLS:-https://www.amazon.com/Best-Sellers-Electronics/zgbs/electronics,https://www.amazon.com/Best-Sellers-Home-Kitchen/zgbs/home-garden,https://www.amazon.com/Best-Sellers-Toys-Games/zgbs/toys-and-games,https://www.amazon.com/Best-Sellers-Sports-Outdoors/zgbs/sporting-goods,https://www.amazon.com/Best-Sellers-Beauty/zgbs/beauty}
+  SCRAPE_MAX_PRODUCTS: ${SCRAPE_MAX_PRODUCTS:-8}
   SCRAPE_INTERVAL_HOURS: ${SCRAPE_INTERVAL_HOURS:-6}
   PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
   SCRAPE_PROXY: ${SCRAPE_PROXY:-}
   SCRAPE_SNAPSHOT_FALLBACK: ${SCRAPE_SNAPSHOT_FALLBACK:-true}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3011,http://localhost:5173}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
 services:
@@ -91,7 +92,7 @@ services:
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "false"
-    # Chromium падає на дефолтних 64 МБ /dev/shm
+    # Chromium crashes on the default 64 MB /dev/shm
     shm_size: 1gb
     depends_on:
       postgres:
@@ -107,7 +108,7 @@ services:
       context: .
       target: api
     container_name: trend-radar-beat
-    command: ["celery", "-A", "app.celery_app.celery", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "app.celery.celery_app.celery", "beat", "--loglevel=info"]
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "false"
@@ -116,6 +117,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: trend-radar-frontend
+    ports:
+      - "${FRONTEND_EXTERNAL_PORT:-3011}:80"
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      # 127.0.0.1, not localhost: that resolves to ::1 first and nginx only
+      # listens on IPv4, so the check would fail against a healthy server.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 volumes:

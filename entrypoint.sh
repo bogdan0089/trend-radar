@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Один entrypoint на всі сервіси. Ручних кроків після `docker compose up` бути не повинно.
+# One entrypoint for every service. No manual steps after `docker compose up`.
 set -e
 
 echo "[entrypoint] waiting for postgres at ${POSTGRES_HOST}:${POSTGRES_PORT} ..."
