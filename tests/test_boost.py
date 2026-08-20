@@ -1,7 +1,4 @@
-"""Тести Boost Score — ядра вимоги ТЗ про Internal Sales Boost.
-
-Алгоритм детермінований, тож перевіряється повністю: без БД, без моків.
-"""
+"""Tests for the Boost Score, the core of the Internal Sales Boost requirement."""
 
 import pytest
 
@@ -41,7 +38,7 @@ class TestCategoryMatch:
         assert result.matched_category == "Sports"
 
     def test_partial_category_match(self, yoga_mat):
-        """Amazon віддає 'Best Sellers in Sports', у нашій історії просто 'Sports'."""
+        """Amazon says 'Best Sellers in Sports' where our history says 'Sports'."""
         result = calculate_boost(
             title="Dumbbell Rack", category="Best Sellers in Sports", past=[yoga_mat]
         )
@@ -68,7 +65,7 @@ class TestKeywordMatch:
         assert result.matched_keywords == ["mat", "yoga"]
 
     def test_keyword_points_are_capped(self):
-        """Багато спільних слів не мають давати нескінченний бал."""
+        """Many shared words must not add up to an unbounded score."""
         entry = PastEntry(
             title="x",
             category="Other",
@@ -80,8 +77,7 @@ class TestKeywordMatch:
         assert result.score == MAX_KEYWORD_POINTS
 
     def test_keywords_derived_from_title_when_empty(self):
-        """Минулий товар без keywords усе одно має знаходитись — слова беруться
-        з його назви, інакше запис був би марним."""
+        """A past product without keywords matches on words from its title."""
         entry = PastEntry(title="Air Fryer Basket", category="Other", keywords=[])
         result = calculate_boost(title="Ninja Air Fryer", category="Kitchen", past=[entry])
         assert result.score > 0
@@ -107,8 +103,7 @@ class TestCombined:
         assert result.score == MAX_BOOST
 
     def test_points_counted_once_across_many_past_products(self):
-        """Десять наших хітів в одній категорії не роблять товар у десять разів
-        перспективнішим — бал за категорію нараховується один раз."""
+        """Category points are awarded once, however many past products match."""
         history = [
             PastEntry(title=f"Item {i}", category="Sports", keywords=[]) for i in range(10)
         ]
@@ -119,7 +114,7 @@ class TestCombined:
 
 class TestExplain:
     def test_explains_no_match(self):
-        assert "не знайдено" in calculate_boost(title="X", category="Y", past=[]).explain()
+        assert "No matches" in calculate_boost(title="X", category="Y", past=[]).explain()
 
     def test_explains_match(self, yoga_mat):
         text = calculate_boost(
