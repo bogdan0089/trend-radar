@@ -1,0 +1,6 @@
+# Development and CI only. The runtime images install requirements.txt alone,
+# so neither the linter nor the test runner ends up in a shipped container.
+-r requirements.txt
+
+pytest==8.3.4
+ruff==0.8.4

@@ -1,0 +1,143 @@
+# Fully isolated project: own name, own volumes, non-default host ports.
+name: trend-radar
+
+x-backend-env: &backend-env
+  POSTGRES_USER: ${POSTGRES_USER:-trend}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trend}
+  POSTGRES_DB: ${POSTGRES_DB:-trend_radar}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_DB: ${REDIS_DB:-0}
+  SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me-in-production}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+  LLM_PROVIDER: ${LLM_PROVIDER:-none}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+  AMAZON_CATEGORY_URLS: ${AMAZON_CATEGORY_URLS:-https://www.amazon.com/Best-Sellers-Electronics/zgbs/electronics,https://www.amazon.com/Best-Sellers-Home-Kitchen/zgbs/home-garden,https://www.amazon.com/Best-Sellers-Toys-Games/zgbs/toys-and-games,https://www.amazon.com/Best-Sellers-Sports-Outdoors/zgbs/sporting-goods,https://www.amazon.com/Best-Sellers-Beauty/zgbs/beauty}
+  SCRAPE_MAX_PRODUCTS: ${SCRAPE_MAX_PRODUCTS:-8}
+  SCRAPE_INTERVAL_HOURS: ${SCRAPE_INTERVAL_HOURS:-6}
+  PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
+  SCRAPE_PROXY: ${SCRAPE_PROXY:-}
+  SCRAPE_SNAPSHOT_FALLBACK: ${SCRAPE_SNAPSHOT_FALLBACK:-true}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3011,http://localhost:5173}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: trend-radar-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trend}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trend}
+      POSTGRES_DB: ${POSTGRES_DB:-trend_radar}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5442}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trend} -d ${POSTGRES_DB:-trend_radar}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: trend-radar-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "${REDIS_EXTERNAL_PORT:-6390}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: api
+    container_name: trend-radar-api
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "true"
+    ports:
+      - "${API_EXTERNAL_PORT:-8011}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+    container_name: trend-radar-worker
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    # Chromium crashes on the default 64 MB /dev/shm
+    shm_size: 1gb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      target: api
+    container_name: trend-radar-beat
+    command: ["celery", "-A", "app.celery.celery_app.celery", "beat", "--loglevel=info"]
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: trend-radar-frontend
+    ports:
+      - "${FRONTEND_EXTERNAL_PORT:-3011}:80"
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      # 127.0.0.1, not localhost: that resolves to ::1 first and nginx only
+      # listens on IPv4, so the check would fail against a healthy server.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

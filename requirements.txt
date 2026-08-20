@@ -1,0 +1,25 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+sqlalchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+
+celery[redis]==5.4.0
+redis==5.2.1
+
+python-jose[cryptography]==3.3.0
+passlib==1.7.4
+# 4.1+ dropped __about__, which passlib still reads, so 4.0.1 is pinned
+bcrypt==4.0.1
+python-multipart==0.0.20
+
+playwright==1.49.1
+httpx==0.28.1
+# HTML is parsed separately from the browser, so the parser is tested against a
+# saved snapshot without starting Chromium. These are HTML libraries, not a
+# third-party scraping API.
+beautifulsoup4==4.12.3
+lxml==5.3.0

@@ -1,0 +1,48 @@
+# Production overlay. Applied on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+#
+# It changes three things and nothing else:
+#   1. Postgres and Redis stop publishing host ports. In the base file they are
+#      exposed so a developer can attach psql or redis-cli; on a public host
+#      that is an open database.
+#   2. The frontend serves on 80 instead of 3011.
+#   3. `restart: always`, so a reboot brings the stack back without anyone
+#      logging in.
+#
+# The application images are identical -- what differs is the .env beside them.
+
+services:
+  postgres:
+    # Removes the port publication inherited from the base file.
+    ports: !reset []
+    restart: always
+
+  redis:
+    ports: !reset []
+    restart: always
+
+  api:
+    restart: always
+    # `!override`, not a plain list: compose *appends* port mappings when it
+    # merges files, so without it the public 8011 from the base file would stay
+    # bound alongside the loopback one and this whole section would be theatre.
+    #
+    # Published on localhost only: a TLS proxy on the host reaches it, the
+    # internet does not.
+    ports: !override
+      - "127.0.0.1:${API_EXTERNAL_PORT:-8011}:8000"
+
+  worker:
+    restart: always
+
+  beat:
+    restart: always
+
+  frontend:
+    restart: always
+    # The only service meant to be reachable from outside. Set
+    # FRONTEND_EXTERNAL_PORT=80 in the production .env, or leave it behind a TLS
+    # proxy on the host.
+    ports: !override
+      - "${FRONTEND_EXTERNAL_PORT:-80}:80"

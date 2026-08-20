@@ -1,0 +1,29 @@
+# Without this the build context ships .git, frontend and venv — gigabytes of upload per build.
+
+.git/
+.gitignore
+.gitattributes
+
+# Secrets never reach the image
+.env
+
+# The frontend has its own Dockerfile
+frontend/
+node_modules/
+dist/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+.idea/
+.vscode/
+.DS_Store
+
+README.md
+ARCHITECTURE.md
