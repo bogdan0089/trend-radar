@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import quote
@@ -30,6 +31,14 @@ DEFAULT_MODELS = {
 }
 
 MAX_TOKENS = 1024
+
+# Free provider tiers rate-limit long batches: 40 products in a row is enough to
+# hit one. Retrying keeps the run on the LLM instead of dropping it all to the
+# formula, and the delays stay short so a dead provider still fails fast.
+RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+MAX_ATTEMPTS = 3
+BACKOFF_SECONDS = (2.0, 5.0)
+MAX_RETRY_DELAY = 10.0
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -146,20 +155,47 @@ class GeminiClient:
 
 def _post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
     """POST shared by every provider; any failure becomes ExternalServiceError."""
-    try:
-        response = httpx.post(url, json=payload, headers=headers, timeout=timeout)
-    except httpx.HTTPError as exc:
-        raise ExternalServiceError(f"LLM unreachable: {exc}") from exc
+    last_error = ""
 
-    if response.status_code >= 400:
-        raise ExternalServiceError(
-            f"LLM responded {response.status_code}: {response.text[:200]}"
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            response = httpx.post(url, json=payload, headers=headers, timeout=timeout)
+        except httpx.HTTPError as exc:
+            raise ExternalServiceError(f"LLM unreachable: {exc}") from exc
+
+        if response.status_code < 400:
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise ExternalServiceError(f"LLM returned non-JSON: {exc}") from exc
+
+        last_error = f"LLM responded {response.status_code}: {response.text[:200]}"
+
+        # A rate limit or a provider hiccup passes on its own; a wrong key or an
+        # unknown model never will, so those fail on the first reply.
+        if response.status_code not in RETRY_STATUSES or attempt == MAX_ATTEMPTS - 1:
+            break
+
+        delay = _retry_delay(response, attempt)
+        logger.warning(
+            "LLM responded %d, retry %d/%d in %.0fs",
+            response.status_code,
+            attempt + 1,
+            MAX_ATTEMPTS - 1,
+            delay,
         )
+        time.sleep(delay)
 
+    raise ExternalServiceError(last_error)
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    """Honour Retry-After when the provider sends it, back off otherwise."""
+    header = response.headers.get("Retry-After", "")
     try:
-        return response.json()
-    except ValueError as exc:
-        raise ExternalServiceError(f"LLM returned non-JSON: {exc}") from exc
+        return min(float(header), MAX_RETRY_DELAY)
+    except ValueError:
+        return BACKOFF_SECONDS[attempt]
 
 
 def parse_verdict(raw: str) -> LLMVerdict:

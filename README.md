@@ -175,6 +175,13 @@ turns into a silent zero.
 
 Supported providers: `anthropic`, `openai`, `gemini`, `grok`, `none`.
 
+**Rate limits.** One run scores up to 40 products back to back, which is enough
+to hit the quota on a provider's free tier. A `429` or a 5xx is retried twice
+with a short backoff, honouring `Retry-After` when the provider sends it; a
+wrong key or an unknown model is not retried, because those never pass. If the
+quota is genuinely exhausted, each product falls to the formula and the log says
+which one and why — the run still completes and every product keeps a score.
+
 ---
 
 ## Configuration
@@ -213,7 +220,7 @@ pytest -q
 ruff check .
 ```
 
-177 tests. The database tests need Postgres because the code relies on JSONB,
+185 tests. The database tests need Postgres because the code relies on JSONB,
 ARRAY and `DISTINCT ON`, none of which SQLite provides. Without a database they
 skip, so the pure unit tests still run anywhere — except in CI, where
 `REQUIRE_TEST_DB=1` turns that skip into a failure. A green CI run that quietly
@@ -293,7 +300,7 @@ app/
 alembic/           migrations
 frontend/          Vue 3 SPA served by nginx
 scripts/           smoke.sh, check_seed.py
-tests/             177 tests
+tests/             185 tests
 ```
 
 ## Stack

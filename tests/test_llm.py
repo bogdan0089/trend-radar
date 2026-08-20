@@ -1,5 +1,7 @@
 """Tests for LLM response handling and provider selection."""
 
+import json
+
 import pytest
 
 from app.core.exceptions import ExternalServiceError
@@ -181,3 +183,93 @@ class TestBuildClient:
             monkeypatch, llm_provider="grok", llm_api_key="k", llm_model="grok-4-fast"
         )
         assert build_client().model == "grok-4-fast"
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, payload: dict | None = None, headers: dict | None = None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._payload = payload if payload is not None else {"error": "boom"}
+        self.text = json.dumps(self._payload)
+
+    def json(self) -> dict:
+        return self._payload
+
+
+@pytest.fixture
+def http_calls(monkeypatch):
+    """Drive _post directly: queue responses, record posts, never really sleep."""
+    state: dict = {"queue": [], "posts": 0, "slept": []}
+
+    def fake_post(url, **kwargs):
+        state["posts"] += 1
+        return state["queue"].pop(0)
+
+    monkeypatch.setattr(llm_module.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_module.time, "sleep", lambda s: state["slept"].append(s))
+    return state
+
+
+class TestRetryOnRateLimit:
+    """Free provider tiers 429 on long batches; one retry keeps the run on the LLM."""
+
+    def test_429_then_success(self, http_calls):
+        http_calls["queue"] = [
+            _FakeResponse(429),
+            _FakeResponse(200, {"ok": True}),
+        ]
+
+        assert llm_module._post("u", {}, {}, 5) == {"ok": True}
+        assert http_calls["posts"] == 2
+        assert http_calls["slept"] == [llm_module.BACKOFF_SECONDS[0]]
+
+    def test_gives_up_after_max_attempts(self, http_calls):
+        http_calls["queue"] = [_FakeResponse(429) for _ in range(llm_module.MAX_ATTEMPTS)]
+
+        with pytest.raises(ExternalServiceError, match="429"):
+            llm_module._post("u", {}, {}, 5)
+
+        assert http_calls["posts"] == llm_module.MAX_ATTEMPTS
+
+    def test_a_bad_key_is_not_retried(self, http_calls):
+        """401 will never pass, so retrying only delays the fallback."""
+        http_calls["queue"] = [_FakeResponse(401)]
+
+        with pytest.raises(ExternalServiceError, match="401"):
+            llm_module._post("u", {}, {}, 5)
+
+        assert http_calls["posts"] == 1
+        assert http_calls["slept"] == []
+
+    def test_unknown_model_is_not_retried(self, http_calls):
+        http_calls["queue"] = [_FakeResponse(404)]
+
+        with pytest.raises(ExternalServiceError, match="404"):
+            llm_module._post("u", {}, {}, 5)
+
+        assert http_calls["posts"] == 1
+
+    def test_retry_after_header_wins_over_the_backoff(self, http_calls):
+        http_calls["queue"] = [
+            _FakeResponse(429, headers={"Retry-After": "4"}),
+            _FakeResponse(200, {"ok": True}),
+        ]
+
+        llm_module._post("u", {}, {}, 5)
+        assert http_calls["slept"] == [4.0]
+
+    def test_retry_after_is_capped(self, http_calls):
+        """A provider asking for ten minutes must not stall the whole pipeline."""
+        http_calls["queue"] = [
+            _FakeResponse(429, headers={"Retry-After": "600"}),
+            _FakeResponse(200, {"ok": True}),
+        ]
+
+        llm_module._post("u", {}, {}, 5)
+        assert http_calls["slept"] == [llm_module.MAX_RETRY_DELAY]
+
+    def test_server_errors_are_retried_too(self, http_calls):
+        http_calls["queue"] = [_FakeResponse(503), _FakeResponse(200, {"ok": True})]
+
+        assert llm_module._post("u", {}, {}, 5) == {"ok": True}
+        assert http_calls["posts"] == 2
