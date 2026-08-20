@@ -100,7 +100,7 @@ class PipelineService:
         """Run the pipeline; a failure is recorded on the run and then re-raised."""
         run = self.runs.get(run_id)
         if run is None:
-            raise NotFoundError(f"Run {run_id} not found")
+            raise NotFoundError("Run", run_id)
 
         self.runs.mark_running(run)
         self.db.commit()
