@@ -1,13 +1,4 @@
-"""Скоринг товарів: LLM або детермінована формула.
-
-Вимога ТЗ: ШІ генерує підсумковий рейтинг на основі даних товару, трендів і
-внутрішнього бусту; без ключа працює математична формула. Обидві гілки віддають
-однаковий контракт — score 0-100 і текстовий reasoning.
-
-Правило фолбеку: будь-яка проблема з LLM (немає ключа, таймаут, 429, невалідний
-JSON) переводить конкретний товар на формулу і пише в лог ПРИЧИНУ. Тихо
-підставити нуль — найгірше, що тут можна зробити.
-"""
+"""Product scoring: an LLM when configured, the deterministic formula otherwise."""
 
 from dataclasses import dataclass
 
@@ -15,8 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ExternalServiceError
 from app.core.logging import get_logger
+from app.integrations.google_trends import MIN_RELIABLE_INTEREST
 from app.integrations.llm import LLMClient, build_client, parse_verdict
 from app.models.product import Product
+from app.models.trend import TrendSnapshot
 from app.repositories.product import ProductRepository
 from app.repositories.score import ScoreRepository
 from app.repositories.trend import TrendRepository
@@ -26,12 +19,12 @@ from app.services.scoring import ScoreResult, calculate_fallback_score
 logger = get_logger(__name__)
 
 _SYSTEM_PROMPT = (
-    "Ти досвідчений баєр e-commerce. Оцінюєш потенціал товару для перепродажу "
-    "за даними з Amazon, динамікою Google Trends і схожістю з нашими минулими "
-    "успішними товарами.\n"
-    "Відповідай ВИКЛЮЧНО одним JSON-об'єктом без пояснень навколо:\n"
-    '{"score": <ціле 0-100>, "reasoning": "<2-4 речення українською>"}\n'
-    "У reasoning назви конкретні цифри, на які спираєшся."
+    "You are an experienced e-commerce buyer. You rate a product's resale "
+    "potential from its Amazon data, its Google Trends dynamics and its "
+    "similarity to our past successful products.\n"
+    "Reply with EXACTLY one JSON object and no surrounding text:\n"
+    '{"score": <integer 0-100>, "reasoning": "<2-4 sentences>"}\n'
+    "In the reasoning cite the concrete numbers you relied on."
 )
 
 
@@ -43,36 +36,35 @@ class ScoringOutcome:
 
 
 class ScoringService:
-    def __init__(self, db: Session, llm: LLMClient | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        llm: LLMClient | None = None,
+        *,
+        use_llm: bool = True,
+    ) -> None:
+        """`use_llm=False` forces the formula even when a key is configured."""
         self.db = db
         self.products = ProductRepository(db)
         self.trends = TrendRepository(db)
         self.scores = ScoreRepository(db)
         self.boost = BoostService(db)
-        # None = ключа немає, працюємо на формулі. У тестах підміняється моком.
-        self.llm = llm if llm is not None else build_client()
+        self.llm = llm if llm is not None else (build_client() if use_llm else None)
 
     def score_products(self, product_ids: list[int]) -> ScoringOutcome:
         products = self.products.list_by_ids(product_ids)
         if not products:
             return ScoringOutcome()
 
-        # Обидва запити — по одному на всю пачку, не на кожен товар
         trends = self.trends.latest_by_products([p.id for p in products])
         self.boost.index()
 
         outcome = ScoringOutcome()
         for product in products:
-            snapshot = trends.get(product.id)
-            # source='unavailable' означає «Google не дав даних», а не «попит нульовий»
-            delta = (
-                snapshot.delta_pct
-                if snapshot is not None and snapshot.source == "google_trends"
-                else None
-            )
+            delta, unreliable = self._read_trend(trends.get(product.id))
             boost = self.boost.calculate(title=product.title, category=product.category)
 
-            result, provider = self._evaluate(product, delta, boost)
+            result, provider = self._evaluate(product, delta, unreliable, boost)
             self.scores.create(
                 product_id=product.id,
                 score=result.score,
@@ -90,23 +82,33 @@ class ScoringService:
 
         self.db.commit()
         logger.info(
-            "Скоринг: оцінок %d (LLM %d, формула %d)",
+            "Scoring: %d ratings (LLM %d, formula %d)",
             outcome.created,
             outcome.by_llm,
             outcome.by_fallback,
         )
         return outcome
 
-    # --------------------------------------------------------------- внутрішнє
+    @staticmethod
+    def _read_trend(snapshot: TrendSnapshot | None) -> tuple[float | None, bool]:
+        """Return the demand change and whether it rests on too little data."""
+        if snapshot is None or snapshot.source != "google_trends":
+            return None, False
+
+        unreliable = (
+            snapshot.interest_avg is None or snapshot.interest_avg < MIN_RELIABLE_INTEREST
+        )
+        return snapshot.delta_pct, unreliable
 
     def _evaluate(
-        self, product: Product, delta: float | None, boost: BoostResult
+        self, product: Product, delta: float | None, unreliable: bool, boost: BoostResult
     ) -> tuple[ScoreResult, str]:
         fallback = calculate_fallback_score(
             title=product.title,
             rating=product.rating,
             reviews_count=product.reviews_count,
             trend_delta_pct=delta,
+            trend_unreliable=unreliable,
             boost_score=boost.score,
             boost_explanation=boost.explain(),
         )
@@ -117,19 +119,17 @@ class ScoringService:
         try:
             raw = self.llm.complete(
                 system=_SYSTEM_PROMPT,
-                prompt=self._build_prompt(product, delta, boost),
+                prompt=self._build_prompt(product, delta, unreliable, boost),
             )
             verdict = parse_verdict(raw)
         except ExternalServiceError as exc:
-            # Причина обов'язково в лозі: інакше мовчазний фолбек не помітять
             logger.warning(
-                "Скоринг товару %s: LLM не спрацював (%s) — беру формулу",
+                "Scoring %s: LLM failed (%s), using the formula",
                 product.asin,
                 exc,
             )
             return fallback, "fallback"
 
-        # Розклад формули лишаємо навіть для LLM: за ним оцінку можна перевірити
         return (
             ScoreResult(
                 score=verdict.score,
@@ -140,21 +140,29 @@ class ScoringService:
         )
 
     @staticmethod
-    def _build_prompt(product: Product, delta: float | None, boost: BoostResult) -> str:
-        trend_line = (
-            "Google Trends: даних немає"
-            if delta is None
-            else f"Google Trends: попит {'зростає' if delta >= 0 else 'спадає'} "
-            f"на {abs(delta):.1f}% від середнього за рік"
-        )
-        price = f"{product.price} {product.currency}" if product.price else "не вказана"
-        rating = f"{product.rating}/5" if product.rating else "немає"
+    def _build_prompt(
+        product: Product, delta: float | None, unreliable: bool, boost: BoostResult
+    ) -> str:
+        if delta is None:
+            trend_line = "Google Trends: no data"
+        elif unreliable:
+            trend_line = (
+                f"Google Trends: {delta:+.1f}% against the yearly average, but the search "
+                "history is nearly empty, so treat this figure as unreliable"
+            )
+        else:
+            trend_line = (
+                f"Google Trends: demand {'rising' if delta >= 0 else 'falling'} "
+                f"{abs(delta):.1f}% against the yearly average"
+            )
+        price = f"{product.price} {product.currency}" if product.price else "not shown"
+        rating = f"{product.rating}/5" if product.rating else "none"
 
         return (
-            f"Товар: {product.title[:200]}\n"
-            f"Категорія: {product.category}\n"
-            f"Ціна: {price}\n"
-            f"Рейтинг: {rating}, відгуків: {product.reviews_count}\n"
+            f"Product: {product.title[:200]}\n"
+            f"Category: {product.category}\n"
+            f"Price: {price}\n"
+            f"Rating: {rating}, reviews: {product.reviews_count}\n"
             f"{trend_line}\n"
-            f"Внутрішній буст: {boost.explain()}"
+            f"Internal boost: {boost.explain()}"
         )

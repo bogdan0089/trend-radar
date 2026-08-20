@@ -25,7 +25,7 @@ def create_access_token(subject: str) -> str:
 
 
 def decode_access_token(token: str) -> str | None:
-    """Повертає username або None, якщо токен битий чи протух."""
+    """Return the username, or None if the token is malformed or expired."""
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
     except JWTError:

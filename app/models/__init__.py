@@ -1,8 +1,4 @@
-"""Реєстр моделей.
-
-Alembic імпортує саме цей модуль, тож кожна нова модель має бути тут —
-інакше autogenerate її не побачить.
-"""
+"""Model registry. Alembic reads it, so every model must be listed here."""
 
 from app.models.past_product import PastProduct
 from app.models.product import Product

@@ -15,8 +15,7 @@ class ScoreRepository(BaseRepository[Score]):
         boost_score: int = 0,
         breakdown: dict | None = None,
     ) -> Score:
-        """Кожен запуск додає нову оцінку, стару не перезаписуємо —
-        так видно, як бал товару змінювався з часом."""
+        """Append a new score; earlier ones are kept so the history stays visible."""
         return self.add(
             Score(
                 product_id=product_id,

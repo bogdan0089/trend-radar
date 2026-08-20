@@ -1,11 +1,15 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+if TYPE_CHECKING:
+    from app.repositories.product import ProductRow
+
 
 class ScoreRead(BaseModel):
-    """Оцінка товару. `score` і `reasoning` — обовʼязкові за ТЗ."""
+    """A product rating with its explanation."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -18,8 +22,7 @@ class ScoreRead(BaseModel):
 
 
 class ProductRead(BaseModel):
-    """Сім полів з ТЗ + службові. Назовні віддаємо тільки цю схему,
-    ORM-модель за межі сервісного шару не виходить."""
+    """A product as the API returns it."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,14 +43,18 @@ class ProductRead(BaseModel):
 
 
 class ProductListItem(ProductRead):
-    """Рядок дашборду: товар + його остання оцінка + динаміка тренду.
-
-    `score` може бути None — товар щойно спарсили, а скоринг ще не відпрацював.
-    Фронт має вміти це показати, а не впасти.
-    """
+    """Dashboard row: a product with its latest score and trend movement."""
 
     score: ScoreRead | None = None
     trend_delta_pct: float | None = None
+
+    @classmethod
+    def from_row(cls, row: "ProductRow") -> "ProductListItem":
+        """Flatten a repository row into the response schema."""
+        item = cls.model_validate(row.product)
+        item.score = ScoreRead.model_validate(row.score) if row.score else None
+        item.trend_delta_pct = row.trend_delta_pct
+        return item
 
 
 class ProductListResponse(BaseModel):

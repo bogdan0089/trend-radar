@@ -14,7 +14,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 _UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Потрібна авторизація",
+    detail="Authentication required",
     headers={"WWW-Authenticate": "Bearer"},
 )
 
@@ -23,17 +23,18 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    """Resolve the bearer token into a user, or reject the request with 401."""
     if credentials is None:
         raise _UNAUTHORIZED
 
     username = decode_access_token(credentials.credentials)
     if username is None:
-        logger.warning("Відхилено битий або протухлий токен")
+        logger.warning("Rejected a malformed or expired token")
         raise _UNAUTHORIZED
 
     user = UserRepository(db).get_by_username(username)
     if user is None or not user.is_active:
-        logger.warning("Токен валідний, але користувача '%s' нема або він вимкнений", username)
+        logger.warning("Token is valid but user '%s' is missing or disabled", username)
         raise _UNAUTHORIZED
 
     return user

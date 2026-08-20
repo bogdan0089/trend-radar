@@ -8,11 +8,7 @@ class TrendRepository(BaseRepository[TrendSnapshot]):
     model = TrendSnapshot
 
     def latest_by_products(self, product_ids: list[int]) -> dict[int, TrendSnapshot]:
-        """Найсвіжіший знімок на кожен товар — одним запитом.
-
-        DISTINCT ON лишає перший рядок у групі за ORDER BY, тож сортування
-        від нових до старих дає рівно по одному актуальному знімку.
-        """
+        """Newest snapshot per product in a single query via DISTINCT ON."""
         if not product_ids:
             return {}
 
@@ -40,8 +36,7 @@ class TrendRepository(BaseRepository[TrendSnapshot]):
         source: str = "google_trends",
         error: str | None = None,
     ) -> TrendSnapshot:
-        """Знімок тренду. Історію не перезаписуємо: кожен збір — новий рядок,
-        щоб було видно, як попит змінювався від запуску до запуску."""
+        """Append a snapshot; every run adds a row so demand history is preserved."""
         return self.add(
             TrendSnapshot(
                 product_id=product_id,

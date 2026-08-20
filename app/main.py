@@ -5,7 +5,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.router import api_router
+from app.api.routes import api_router
+from app.core.config import settings
 from app.core.exceptions import (
     AlreadyExistsError,
     DomainError,
@@ -18,30 +19,29 @@ from app.core.logging import configure_logging, get_logger
 configure_logging()
 logger = get_logger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    logger.info("Trend Radar API стартував")
+    logger.info("Trend Radar API started")
     yield
-    logger.info("Trend Radar API зупинився")
+    logger.info("Trend Radar API stopped")
 
 
 app = FastAPI(
     title="Trend Radar API",
-    description="Парсинг, AI-скоринг та аналітика трендових товарів",
-    version="0.1.0",
+    description="Scraping, AI scoring and analytics for trending products",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Мапа доменних винятків у HTTP — єдине місце, де вони перетворюються на статуси.
-# Завдяки цьому сервіси нічого не знають про HTTP.
 _STATUS_BY_ERROR: list[tuple[type[DomainError], int]] = [
     (NotFoundError, 404),
     (AlreadyExistsError, 409),
@@ -54,7 +54,7 @@ _STATUS_BY_ERROR: list[tuple[type[DomainError], int]] = [
 def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = next((s for err, s in _STATUS_BY_ERROR if isinstance(exc, err)), 400)
     if status >= 500:
-        logger.exception("Необроблена доменна помилка на %s", request.url.path)
+        logger.exception("Unhandled domain error at %s", request.url.path)
     return JSONResponse(status_code=status, content={"detail": str(exc)})
 
 

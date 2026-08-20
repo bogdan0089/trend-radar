@@ -1,17 +1,10 @@
-"""Адаптери LLM-провайдерів під спільним інтерфейсом.
-
-ТЗ вимагає, щоб провайдер і ключ задавались через .env, тож обидва провайдери
-викликаються по HTTP (httpx), а не через два різні SDK. Сервіс скорингу знає
-тільки про `LLMClient` і не здогадується, хто саме за ним стоїть.
-
-Без ключа `build_client()` повертає None — і скоринг іде на детерміновану
-формулу. Проєкт має підніматись без API-ключа.
-"""
+"""LLM provider adapters behind one interface, configured from .env."""
 
 import json
 import re
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import quote
 
 import httpx
 
@@ -24,14 +17,21 @@ logger = get_logger(__name__)
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+GROK_URL = "https://api.x.ai/v1/chat/completions"
+GEMINI_URL_TEMPLATE = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
 
-DEFAULT_MODELS = {"anthropic": "claude-opus-5", "openai": "gpt-4o-mini"}
+DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-5",
+    "openai": "gpt-4o-mini",
+    "gemini": "gemini-2.5-flash",
+    "grok": "grok-4",
+}
 
 MAX_TOKENS = 1024
 
-# Модель інколи загортає JSON у ```json ... ``` — витягуємо вміст блоку
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
-# Останній рубіж: перший об'єкт у тексті
 _OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
@@ -42,7 +42,7 @@ class LLMVerdict:
 
 
 class LLMClient(Protocol):
-    """Контракт, від якого залежить сервіс скорингу."""
+    """The contract the scoring service depends on."""
 
     provider: str
 
@@ -58,7 +58,6 @@ class AnthropicClient:
         self.timeout = timeout
 
     def complete(self, *, system: str, prompt: str) -> str:
-        # temperature на актуальних моделях Claude прибрано — надішлеш, буде 400
         payload = {
             "model": self.model,
             "max_tokens": MAX_TOKENS,
@@ -76,16 +75,20 @@ class AnthropicClient:
             blocks = data["content"]
             return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         except (KeyError, TypeError) as exc:
-            raise ExternalServiceError(f"Anthropic віддав неочікувану структуру: {exc}") from exc
+            raise ExternalServiceError(
+                f"Anthropic returned an unexpected structure: {exc}"
+            ) from exc
 
 
-class OpenAIClient:
-    provider = "openai"
+class OpenAICompatibleClient:
+    """Chat-completions protocol, shared by OpenAI and xAI Grok."""
 
-    def __init__(self, *, api_key: str, model: str, timeout: int) -> None:
+    def __init__(self, *, api_key: str, model: str, timeout: int, url: str, provider: str) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.url = url
+        self.provider = provider
 
     def complete(self, *, system: str, prompt: str) -> str:
         payload = {
@@ -100,53 +103,78 @@ class OpenAIClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        data = _post(OPENAI_URL, payload, headers, self.timeout)
+        data = _post(self.url, payload, headers, self.timeout)
 
         try:
             return data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
-            raise ExternalServiceError(f"OpenAI віддав неочікувану структуру: {exc}") from exc
+            raise ExternalServiceError(
+                f"{self.provider} returned an unexpected structure: {exc}"
+            ) from exc
+
+
+class GeminiClient:
+    """Google Gemini generateContent, which keys by query parameter."""
+
+    provider = "gemini"
+
+    def __init__(self, *, api_key: str, model: str, timeout: int) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+
+    def complete(self, *, system: str, prompt: str) -> str:
+        payload = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": MAX_TOKENS},
+        }
+        url = GEMINI_URL_TEMPLATE.format(model=quote(self.model))
+        data = _post(
+            f"{url}?key={quote(self.api_key)}",
+            payload,
+            {"Content-Type": "application/json"},
+            self.timeout,
+        )
+
+        try:
+            parts = data["candidates"][0]["content"]["parts"]
+            return "".join(part.get("text", "") for part in parts)
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ExternalServiceError(f"Gemini returned an unexpected structure: {exc}") from exc
 
 
 def _post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
-    """Один POST на обидва провайдери. Будь-яка мережева біда → ExternalServiceError,
-    щоб сервіс скорингу мав рівно один тип винятку для фолбеку."""
+    """POST shared by every provider; any failure becomes ExternalServiceError."""
     try:
         response = httpx.post(url, json=payload, headers=headers, timeout=timeout)
     except httpx.HTTPError as exc:
-        raise ExternalServiceError(f"LLM недоступний: {exc}") from exc
+        raise ExternalServiceError(f"LLM unreachable: {exc}") from exc
 
     if response.status_code >= 400:
-        # Тіло може містити підказку (ліміт, невірна модель), але не ключ
         raise ExternalServiceError(
-            f"LLM відповів {response.status_code}: {response.text[:200]}"
+            f"LLM responded {response.status_code}: {response.text[:200]}"
         )
 
     try:
         return response.json()
     except ValueError as exc:
-        raise ExternalServiceError(f"LLM віддав не-JSON: {exc}") from exc
+        raise ExternalServiceError(f"LLM returned non-JSON: {exc}") from exc
 
 
 def parse_verdict(raw: str) -> LLMVerdict:
-    """Текст відповіді → score + reasoning.
-
-    Модель майже завжди повертає валідний JSON, але «майже» тут недостатньо:
-    навколо нього бувають ```-огорожа і пояснювальний текст. Не розібрали —
-    кидаємо виняток, і скоринг чесно падає на формулу.
-    """
+    """Turn a model reply into score + reasoning, tolerating fences and prose."""
     payload = _extract_json(raw)
 
     try:
         score = int(round(float(payload["score"])))
         reasoning = str(payload["reasoning"]).strip()
     except (KeyError, TypeError, ValueError) as exc:
-        raise ExternalServiceError(f"У відповіді LLM немає score/reasoning: {exc}") from exc
+        raise ExternalServiceError(f"LLM reply has no score/reasoning: {exc}") from exc
 
     if not reasoning:
-        raise ExternalServiceError("LLM повернув порожній reasoning")
+        raise ExternalServiceError("LLM returned an empty reasoning")
 
-    # Модель інколи пише 105 або -3. Обрізаємо, а не падаємо: сама оцінка змістовна.
     return LLMVerdict(score=max(0, min(100, score)), reasoning=reasoning)
 
 
@@ -167,31 +195,35 @@ def _extract_json(raw: str) -> dict:
         if isinstance(parsed, dict):
             return parsed
 
-    raise ExternalServiceError(f"Відповідь LLM не є JSON: {raw[:200]!r}")
+    raise ExternalServiceError(f"LLM reply is not JSON: {raw[:200]!r}")
 
 
 def build_client() -> LLMClient | None:
-    """Клієнт за налаштуваннями .env, або None — якщо ключа немає.
-
-    Це єдине місце, де вирішується «LLM чи fallback». Сервіс скорингу лише
-    перевіряє результат на None.
-    """
     if not settings.llm_enabled:
         logger.info(
-            "LLM вимкнено (provider=%s, ключ %s) — скоринг піде на формулу",
+            "LLM disabled (provider=%s, key %s), scoring will use the formula",
             settings.llm_provider,
-            "заданий" if settings.llm_api_key else "відсутній",
+            "set" if settings.llm_api_key else "missing",
         )
         return None
 
-    model = settings.llm_model or DEFAULT_MODELS[settings.llm_provider]
-    kwargs = {
-        "api_key": settings.llm_api_key,
-        "model": model,
-        "timeout": settings.llm_timeout_seconds,
-    }
+    provider = settings.llm_provider
+    model = settings.llm_model or DEFAULT_MODELS[provider]
+    logger.info("LLM enabled: provider=%s, model=%s", provider, model)
 
-    logger.info("LLM увімкнено: provider=%s, model=%s", settings.llm_provider, model)
-    if settings.llm_provider == "anthropic":
-        return AnthropicClient(**kwargs)
-    return OpenAIClient(**kwargs)
+    if provider == "anthropic":
+        return AnthropicClient(
+            api_key=settings.llm_api_key, model=model, timeout=settings.llm_timeout_seconds
+        )
+    if provider == "gemini":
+        return GeminiClient(
+            api_key=settings.llm_api_key, model=model, timeout=settings.llm_timeout_seconds
+        )
+
+    return OpenAICompatibleClient(
+        api_key=settings.llm_api_key,
+        model=model,
+        timeout=settings.llm_timeout_seconds,
+        url=GROK_URL if provider == "grok" else OPENAI_URL,
+        provider=provider,
+    )

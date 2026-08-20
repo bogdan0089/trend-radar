@@ -1,6 +1,6 @@
 from typing import Generic, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
@@ -9,11 +9,7 @@ ModelT = TypeVar("ModelT", bound=Base)
 
 
 class BaseRepository(Generic[ModelT]):
-    """Спільні CRUD-операції.
-
-    Репозиторій НЕ комітить — транзакцією керує сервіс. Тут максимум `flush()`,
-    щоб отримати згенерований id.
-    """
+    """Shared CRUD helpers. Never commits: the service owns the transaction."""
 
     model: type[ModelT]
 
@@ -28,8 +24,6 @@ class BaseRepository(Generic[ModelT]):
         return list(self.db.scalars(stmt))
 
     def count(self) -> int:
-        from sqlalchemy import func
-
         return self.db.scalar(select(func.count()).select_from(self.model)) or 0
 
     def add(self, obj: ModelT) -> ModelT:

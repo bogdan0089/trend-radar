@@ -1,8 +1,4 @@
-"""Логіка збору товарів: парсер → дедуплікація → БД → лічильники.
-
-Сервіс не знає ні про HTTP, ні про Celery. Його однаково викликає і роутер,
-і Celery-таска, і сід.
-"""
+"""Product collection: parser -> deduplication -> database -> counters."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.exceptions import ScrapingError
 from app.core.logging import get_logger
-from app.integrations.amazon import ScrapedProduct, parse_bestsellers, scrape_bestsellers
+from app.integrations.amazon import ScrapedProduct, parse_bestsellers, scrape_categories
 from app.repositories.product import ProductRepository
 
 logger = get_logger(__name__)
@@ -22,13 +18,15 @@ SNAPSHOT_PATH = Path(__file__).resolve().parent.parent / "seed_data" / "amazon_b
 
 @dataclass
 class ScrapeOutcome:
-    """Підсумок збору. Йде прямо в лічильники ScrapeRun."""
+    """Collection summary; feeds the ScrapeRun counters directly."""
 
     found: int = 0
     created: int = 0
     updated: int = 0
     product_ids: list[int] = field(default_factory=list)
-    used_snapshot: bool = False  # True — живий Amazon не дався, взяли демо-снапшот
+    used_snapshot: bool = False
+    demo_removed: int = 0
+    failed_categories: dict[str, str] = field(default_factory=dict)
 
 
 class ScrapeService:
@@ -36,30 +34,27 @@ class ScrapeService:
         self.db = db
         self.products = ProductRepository(db)
 
-    def collect(self, *, url: str | None = None, limit: int | None = None) -> ScrapeOutcome:
-        """Живий збір з Amazon. Якщо заблокували — падає на демо-снапшот.
-
-        Запуск при цьому НЕ вважається успішним: викликач бачить `used_snapshot`
-        і ставить ScrapeRun статус 'partial' з поясненням. Ховати блокування
-        під виглядом успіху не можна — інакше ніхто не помітить, що скрапер мертвий.
-        """
+    def collect(self, *, urls: list[str] | None = None, limit: int | None = None) -> ScrapeOutcome:
+        """Scrape every configured category, falling back to the demo snapshot."""
         try:
-            items = scrape_bestsellers(url, limit=limit)
-            return self._save(items, source="amazon")
-
+            result = scrape_categories(urls, limit_per_category=limit)
         except ScrapingError as exc:
-            if not settings.scrape_snapshot_fallback:
-                raise
+            logger.warning("Scrape did not start (%s)", exc)
+            return self._fallback_to_snapshot(limit=limit, reason=str(exc))
 
-            logger.warning("Живий скрапінг не вдався (%s) — беру демо-снапшот", exc)
-            outcome = self.collect_from_snapshot(limit=limit)
-            outcome.used_snapshot = True
-            return outcome
+        if not result.products:
+            reason = "; ".join(result.failures.values()) or "no products were parsed"
+            return self._fallback_to_snapshot(limit=limit, reason=reason)
+
+        outcome = self._save(result.products, source="amazon")
+        outcome.failed_categories = result.failures
+        outcome.demo_removed = self._drop_demo_products()
+        return outcome
 
     def collect_from_snapshot(self, *, limit: int | None = None) -> ScrapeOutcome:
-        """Розбирає збережену сторінку тим самим парсером, що й живий сайт."""
+        """Parse the bundled demo page with the parser used on live HTML."""
         if not SNAPSHOT_PATH.exists():
-            logger.warning("Снапшот %s відсутній — пропускаю", SNAPSHOT_PATH)
+            logger.warning("Snapshot %s is missing, skipping", SNAPSHOT_PATH)
             return ScrapeOutcome()
 
         html = SNAPSHOT_PATH.read_text(encoding="utf-8")
@@ -70,12 +65,27 @@ class ScrapeService:
         outcome.used_snapshot = True
         return outcome
 
-    # ------------------------------------------------------------- внутрішнє
+    def _drop_demo_products(self) -> int:
+        """Discard the bundled demo rows once live data has replaced them."""
+        removed = self.products.delete_by_source("snapshot")
+        if removed:
+            self.db.commit()
+            logger.info("Collect: removed %d demo products, live data is in place", removed)
+        return removed
+
+    def _fallback_to_snapshot(self, *, limit: int | None, reason: str) -> ScrapeOutcome:
+        if not settings.scrape_snapshot_fallback:
+            raise ScrapingError(reason)
+
+        logger.warning("Live scrape failed (%s), falling back to the demo snapshot", reason)
+        outcome = self.collect_from_snapshot(limit=limit)
+        outcome.used_snapshot = True
+        return outcome
 
     def _save(self, scraped: list[ScrapedProduct], *, source: str) -> ScrapeOutcome:
         unique = self._deduplicate(scraped)
         if not unique:
-            logger.warning("Збір: парсер не повернув жодного товару (source=%s)", source)
+            logger.warning("Collect: parser returned no products (source=%s)", source)
             return ScrapeOutcome()
 
         results = self.products.upsert_many(
@@ -90,7 +100,7 @@ class ScrapeService:
             product_ids=[r.product_id for r in results],
         )
         logger.info(
-            "Збір (%s): знайдено %d, створено %d, оновлено %d",
+            "Collect (%s): found %d, created %d, updated %d",
             source,
             outcome.found,
             outcome.created,
@@ -100,12 +110,7 @@ class ScrapeService:
 
     @staticmethod
     def _deduplicate(items: list[ScrapedProduct]) -> list[ScrapedProduct]:
-        """Один ASIN — один рядок у пачці.
-
-        Amazon показує той самий товар у кількох блоках сторінки, а Postgres на
-        два однакові ключі в одному INSERT ... ON CONFLICT відповідає помилкою.
-        Лишаємо перше входження: воно вище в рейтингу бестселерів.
-        """
+        """Keep one row per ASIN, the first occurrence winning."""
         seen: set[str] = set()
         unique: list[ScrapedProduct] = []
         for item in items:
@@ -116,11 +121,6 @@ class ScrapeService:
 
     @staticmethod
     def _to_row(item: ScrapedProduct, *, source: str) -> dict:
-        """ScrapedProduct → словник під колонки таблиці.
-
-        Обрізаємо рядки під довжину колонок: Amazon інколи віддає категорію
-        довшу за 255 символів, і INSERT впав би цілою пачкою.
-        """
         return {
             "asin": item.asin,
             "title": item.title,

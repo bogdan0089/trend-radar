@@ -4,13 +4,13 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ScrapeRunRead(BaseModel):
-    """Стан запуску для панелі: за ним кнопка знає, чи ще йде збір."""
+    """State of one pipeline run, polled by the dashboard."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    status: str  # pending | running | success | partial | failed
-    trigger: str  # manual | schedule
+    status: str
+    trigger: str
 
     products_found: int
     products_created: int

@@ -1,11 +1,4 @@
-"""Internal Sales Boost — додатковий бал за схожість із нашими минулими хітами.
-
-Вимога ТЗ: «Якщо вхідний товар збігається за категорією АБО ключовими словами
-з нашими минулими товарами — алгоритм додає йому додатковий бал».
-
-Алгоритм детермінований і не залежить ні від БД, ні від мережі: `calculate_boost`
-— чиста функція, яку можна повністю покрити тестами. Сервіс лише підвозить їй дані.
-"""
+"""Internal Sales Boost: extra points for resembling our past winners."""
 
 from dataclasses import dataclass, field
 
@@ -13,13 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.repositories.past_product import PastProductRepository
-from app.services.keywords import overlap, tokenize
+from app.utils.keywords import overlap, tokenize
 
 logger = get_logger(__name__)
 
-# Скільки балів за що. Значення підібрані так, щоб збіг категорії важив більше
-# за одне випадкове слово, але кілька спільних слів переважували категорію:
-# «той самий товар іншими словами» — сильніший сигнал, ніж «та сама полиця».
 CATEGORY_MATCH_POINTS = 10
 KEYWORD_MATCH_POINTS = 6
 MAX_KEYWORD_POINTS = 20
@@ -28,7 +18,7 @@ MAX_BOOST = 30
 
 @dataclass(frozen=True, slots=True)
 class PastEntry:
-    """Минулий успішний товар у вигляді, придатному для порівняння."""
+    """A past successful product reduced to what the comparison needs."""
 
     title: str
     category: str
@@ -43,28 +33,22 @@ class BoostResult:
     matched_titles: list[str] = field(default_factory=list)
 
     def explain(self) -> str:
-        """Людське пояснення — іде в reasoning оцінки."""
         if self.score == 0:
-            return "Збігів із нашими минулими товарами не знайдено."
+            return "No matches with our past products."
 
         parts = []
         if self.matched_category:
-            parts.append(f"категорія збігається з «{self.matched_category}»")
+            parts.append(f"category matches '{self.matched_category}'")
         if self.matched_keywords:
             words = ", ".join(sorted(self.matched_keywords)[:5])
-            parts.append(f"спільні слова: {words}")
+            parts.append(f"shared words: {words}")
 
-        titles = ", ".join(f"«{t}»" for t in self.matched_titles[:3])
-        return f"Boost +{self.score}: {'; '.join(parts)}. Схожі минулі товари: {titles}."
+        titles = ", ".join(f"'{t}'" for t in self.matched_titles[:3])
+        return f"Boost +{self.score}: {'; '.join(parts)}. Similar past products: {titles}."
 
 
 def calculate_boost(*, title: str, category: str, past: list[PastEntry]) -> BoostResult:
-    """Рахує Boost Score для одного товару.
-
-    Бали нараховуються один раз за факт, а не за кожен минулий товар: якщо
-    десять наших хітів лежать в одній категорії, це не робить новий товар
-    у десять разів перспективнішим.
-    """
+    """Compute the boost for one product. Points are awarded once per fact."""
     if not past:
         return BoostResult()
 
@@ -98,11 +82,7 @@ def calculate_boost(*, title: str, category: str, past: list[PastEntry]) -> Boos
 
 
 def _category_matches(left: str, right: str) -> bool:
-    """Категорії рідко збігаються символ у символ.
-
-    Amazon віддає «Best Sellers in Electronics», а в нашій історії записано
-    просто «Electronics». Тому вважаємо збігом і входження одного в інше.
-    """
+    """Match categories loosely: containment counts, not only equality."""
     a, b = left.strip().lower(), right.strip().lower()
     if not a or not b:
         return False
@@ -110,23 +90,18 @@ def _category_matches(left: str, right: str) -> bool:
 
 
 class BoostService:
-    """Тонка обгортка: дістає минулі товари з БД і віддає їх алгоритму."""
-
     def __init__(self, db: Session) -> None:
         self.past_products = PastProductRepository(db)
         self._index: list[PastEntry] | None = None
 
     def index(self) -> list[PastEntry]:
-        """Минулі товари вантажимо ОДИН раз на весь запуск пайплайну.
-
-        Інакше на 20 товарах вийшло б 20 однакових SELECT — класичний N+1.
-        """
+        """Load past products once per run and cache them."""
         if self._index is None:
             self._index = [
                 PastEntry(title=p.title, category=p.category, keywords=list(p.keywords or []))
                 for p in self.past_products.list_all()
             ]
-            logger.info("Boost: завантажено %d минулих товарів", len(self._index))
+            logger.info("Boost: loaded %d past products", len(self._index))
         return self._index
 
     def calculate(self, *, title: str, category: str) -> BoostResult:

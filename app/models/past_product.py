@@ -7,10 +7,7 @@ from app.models.mixins import TimestampMixin
 
 
 class PastProduct(TimestampMixin, Base):
-    """«Наш успішний минулий товар» — джерело Internal Sales Boost.
-
-    Заповнюється вручну через форму або імпортом CSV.
-    """
+    """One of our past successful products, the source of the Sales Boost."""
 
     __tablename__ = "past_products"
 
@@ -18,10 +15,9 @@ class PastProduct(TimestampMixin, Base):
 
     title: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
-    # Нормалізовані ключові слова (нижній регістр) — за ними шукаємо перетин
     keywords: Mapped[list[str]] = mapped_column(ARRAY(String(64)), default=list, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)  # manual | csv
+    source: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)
 
     def __repr__(self) -> str:
         return f"<PastProduct {self.title[:30]!r} {self.category}>"

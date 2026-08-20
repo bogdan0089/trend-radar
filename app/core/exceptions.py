@@ -1,32 +1,24 @@
-"""Доменні винятки.
-
-Сервіси кидають їх, шар API мапить у HTTP. Сервіс не знає про HTTP-статуси.
-"""
+"""Domain exceptions. Services raise them, the API layer maps them to HTTP."""
 
 
-class DomainError(Exception):
-    """База для всіх помилок бізнес-логіки."""
+class DomainError(Exception): ...
 
 
-class NotFoundError(DomainError):
-    """Сутності не існує."""
+class NotFoundError(DomainError): ...
 
 
-class AlreadyExistsError(DomainError):
-    """Порушення унікальності на рівні бізнес-правил."""
+class AlreadyExistsError(DomainError): ...
 
 
-class InvalidCredentialsError(DomainError):
-    """Невірний логін або пароль."""
+class InvalidCredentialsError(DomainError): ...
 
 
-class ValidationError(DomainError):
-    """Дані не проходять бізнес-перевірку (напр. битий CSV)."""
+class ValidationError(DomainError): ...
 
 
 class ScrapingError(DomainError):
-    """Скрапер не зміг зібрати дані: капча, блок, таймаут, зміна верстки."""
+    """Captcha, block, timeout, or layout change from the scraper."""
 
 
 class ExternalServiceError(DomainError):
-    """Зовнішній сервіс (LLM, Google Trends) недоступний або відповів сміттям."""
+    """An external service (LLM, Google Trends) is down or returned garbage."""
