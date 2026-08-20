@@ -7,13 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes import api_router
 from app.core.config import settings
-from app.core.exceptions import (
-    AlreadyExistsError,
-    DomainError,
-    InvalidCredentialsError,
-    NotFoundError,
-    ValidationError,
-)
+from app.core.exceptions import DomainError
 from app.core.logging import configure_logging, get_logger
 
 configure_logging()
@@ -42,20 +36,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_STATUS_BY_ERROR: list[tuple[type[DomainError], int]] = [
-    (NotFoundError, 404),
-    (AlreadyExistsError, 409),
-    (InvalidCredentialsError, 401),
-    (ValidationError, 422),
-]
-
 
 @app.exception_handler(DomainError)
 def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
-    status = next((s for err, s in _STATUS_BY_ERROR if isinstance(exc, err)), 400)
-    if status >= 500:
+    if exc.http_status_code >= 500:
         logger.exception("Unhandled domain error at %s", request.url.path)
-    return JSONResponse(status_code=status, content={"detail": str(exc)})
+    return JSONResponse(status_code=exc.http_status_code, content={"detail": str(exc)})
 
 
 app.include_router(api_router)

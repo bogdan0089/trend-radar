@@ -20,11 +20,11 @@ class AuthService:
 
         if user is None or not verify_password(password, user.password_hash):
             logger.warning("Failed login for username=%s", username)
-            raise InvalidCredentialsError("Invalid username or password")
+            raise InvalidCredentialsError()
 
         if not user.is_active:
             logger.warning("Login attempt by a disabled user username=%s", username)
-            raise InvalidCredentialsError("This account is disabled")
+            raise InvalidCredentialsError("account disabled")
 
         logger.info("Successful login username=%s", username)
         return create_access_token(user.username)
