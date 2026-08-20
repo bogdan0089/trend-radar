@@ -1,0 +1,42 @@
+# Lint configuration. Kept in its own file rather than a pyproject.toml the
+# project has no other use for.
+
+line-length = 100
+target-version = "py312"
+
+exclude = ["alembic/versions", ".venv", "frontend"]
+
+[lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "W",    # warnings
+    "I",    # import order
+    "B",    # bugbear: real bug patterns
+    "UP",   # outdated syntax for the target version
+    "C4",   # comprehensions
+    "SIM",  # needless complexity
+    "BLE",  # blind `except Exception`, allowed only with an explicit noqa
+    "RUF",
+]
+
+[lint.isort]
+known-first-party = ["app", "tests"]
+
+[lint.flake8-bugbear]
+# `def handler(db: Session = Depends(get_db))` is how FastAPI declares
+# dependencies. B008 flags it as a call in a default argument, which here is the
+# framework's contract rather than a mistake.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.File",
+    "fastapi.Body",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Form",
+]
+
+[lint.per-file-ignores]
+# Migrations are generated; their import order and long lines are not ours.
+"alembic/env.py" = ["E501"]
