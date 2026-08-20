@@ -1,0 +1,203 @@
+/* Design tokens and the primitives shared across views. */
+
+:root {
+  --bg: #0f1420;
+  --surface: #171d2b;
+  --surface-raised: #1e2637;
+  --border: #2a3346;
+  --text: #e6ebf5;
+  --text-muted: #93a0b8;
+  --accent: #4f8cff;
+  --accent-hover: #6ba0ff;
+  --success: #35c27a;
+  --warning: #e0a635;
+  --danger: #e5544b;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --gap: 16px;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 9px 16px;
+  background: var(--accent);
+  color: #fff;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--border);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.alert {
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--gap);
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+
+.alert.error {
+  background: rgba(229, 84, 75, 0.12);
+  border-color: rgba(229, 84, 75, 0.4);
+  color: #ff9d96;
+}
+
+.alert.success {
+  background: rgba(53, 194, 122, 0.12);
+  border-color: rgba(53, 194, 122, 0.4);
+  color: #7ee0ac;
+}
+
+.alert.info {
+  background: rgba(79, 140, 255, 0.12);
+  border-color: rgba(79, 140, 255, 0.4);
+  color: #a8c6ff;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.badge.success {
+  color: var(--success);
+  border-color: rgba(53, 194, 122, 0.45);
+}
+
+.badge.warning {
+  color: var(--warning);
+  border-color: rgba(224, 166, 53, 0.45);
+}
+
+.badge.danger {
+  color: var(--danger);
+  border-color: rgba(229, 84, 75, 0.45);
+}
+
+/* Wide tables scroll inside their own container so the page never does. */
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
