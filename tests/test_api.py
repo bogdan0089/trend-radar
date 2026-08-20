@@ -4,6 +4,8 @@ import io
 
 import pytest
 
+from app.core.config import settings
+
 PROTECTED_ENDPOINTS = [
     ("get", "/api/products"),
     ("get", "/api/sales-boost"),
@@ -27,12 +29,24 @@ class TestHealth:
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 
-    def test_health_reports_llm_mode(self, client):
+    def test_health_reports_the_no_key_mode(self, client, monkeypatch):
         """The spec requires running with no key; health has to show that state."""
+        monkeypatch.setattr(settings, "llm_provider", "none")
+        monkeypatch.setattr(settings, "llm_api_key", "")
+
         body = client.get("/api/health").json()
 
         assert body["llm_enabled"] is False
         assert body["llm_provider"] == "none"
+
+    def test_health_reports_a_configured_provider(self, client, monkeypatch):
+        monkeypatch.setattr(settings, "llm_provider", "gemini")
+        monkeypatch.setattr(settings, "llm_api_key", "test-key")
+
+        body = client.get("/api/health").json()
+
+        assert body["llm_enabled"] is True
+        assert body["llm_provider"] == "gemini"
 
 
 class TestLogin:

@@ -25,13 +25,14 @@ as a router is.
 - Owns the ORM -> DTO conversion: services hand back ORM rows or dataclasses and
   the router turns them into the `response_model`. Nothing else serialises.
 - Contains **no** business logic and no database queries.
-- `HTTPException` and HTTP status codes live here and nowhere else.
+- Raises no `HTTPException`: a domain error already carries the status it should
+  become, and one handler in `main.py` turns it into a response.
 
 ### `app/services/` — business logic
 - All of it: rules, calculations, orchestration, import reports.
 - Owns the transaction — the service decides when to `commit`.
-- Raises domain exceptions from `app/core/exceptions.py`, **never**
-  `HTTPException`: a service does not know it is running under HTTP.
+- Raises the typed exceptions from `app/core/exceptions.py` — `NotFoundError`,
+  `ValidationError`, `ExternalServiceError` and so on — never `HTTPException`.
 - Knows nothing about `Request`, `Depends` or Celery.
 
 ### `app/repositories/` — data access
@@ -63,6 +64,21 @@ Every scraper is a **pure parsing function** plus a **thin browser driver**:
 That split is why the parser tests are fast and deterministic, why the same
 parser serves both a live scrape and the bundled snapshot, and why a layout
 change on Amazon means fixing exactly one function.
+
+## Errors
+
+Every domain exception carries its own HTTP status and a structured `info`
+dict:
+
+```python
+raise NotFoundError("Run", run_id)      # 404, info={"resource": "Run", "id": "14"}
+raise ValidationError("The file is empty")  # 422
+raise ExternalServiceError("LLM unreachable")  # 502
+```
+
+A single handler in `main.py` reads `exc.http_status_code` and answers. There is
+no lookup table mapping error classes to numbers, so adding an exception cannot
+forget to register it — the status ships with the class that raises it.
 
 ## Transactions
 
