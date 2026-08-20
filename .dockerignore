@@ -1,6 +1,4 @@
-# The build context is the repository root, so without this file the frontend,
-# .git and the virtualenv would all be shipped to the daemon and every build
-# would wait on gigabytes of upload.
+# Without this the build context ships .git, frontend and venv — gigabytes of upload per build.
 
 .git/
 .gitignore
