@@ -8,15 +8,10 @@ class PastProductRepository(BaseRepository[PastProduct]):
     model = PastProduct
 
     def list_all(self) -> list[PastProduct]:
-        """Усі минулі товари — для побудови індексу Boost.
-
-        Без пагінації свідомо: це наша власна історія успішних товарів,
-        її десятки-сотні рядків, і алгоритму потрібні всі одразу.
-        """
+        """Every past product, unpaginated, used to build the boost index."""
         return list(self.db.scalars(select(PastProduct).order_by(PastProduct.id)))
 
     def list_page(self, *, limit: int = 50, offset: int = 0) -> list[PastProduct]:
-        """Сторінка для UI, від нових до старих."""
         stmt = select(PastProduct).order_by(PastProduct.id.desc()).limit(limit).offset(offset)
         return list(self.db.scalars(stmt))
 
@@ -40,11 +35,7 @@ class PastProductRepository(BaseRepository[PastProduct]):
         )
 
     def exists(self, *, title: str, category: str) -> bool:
-        """Перевірка дубля перед вставкою.
-
-        Порівнюємо без урахування регістру: користувач імпортує CSV повторно,
-        і «Yoga Mat» не має додатися другим рядком поруч із «yoga mat».
-        """
+        """Case-insensitive duplicate check, so re-importing a CSV is a no-op."""
         stmt = select(func.count()).select_from(PastProduct).where(
             func.lower(PastProduct.title) == title.strip().lower(),
             func.lower(PastProduct.category) == category.strip().lower(),

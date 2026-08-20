@@ -6,8 +6,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 
-# Синхронний движок навмисно: ті самі моделі й сесії використовують і FastAPI,
-# і Celery-таски. Два движки (async + sync) на MVP дають більше багів, ніж користі.
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
@@ -19,7 +17,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI-залежність."""
+    """FastAPI dependency."""
     db = SessionLocal()
     try:
         yield db
@@ -29,7 +27,7 @@ def get_db() -> Generator[Session, None, None]:
 
 @contextmanager
 def session_scope() -> Generator[Session, None, None]:
-    """Для Celery-тасок і скриптів: комітить сам, відкочує на помилці."""
+    """Session for Celery tasks and scripts: commits on exit, rolls back on error."""
     db = SessionLocal()
     try:
         yield db

@@ -1,10 +1,4 @@
-"""Доступ до історії запусків пайплайну.
-
-ScrapeRun — один запуск. Життєвий цикл:
-    pending → running → success | partial | failed
-
-Репозиторій не комітить: транзакцією володіє сервіс. Тут максимум flush().
-"""
+"""Access to the pipeline run history."""
 
 from datetime import UTC, datetime
 
@@ -18,14 +12,12 @@ class ScrapeRunRepository(BaseRepository[ScrapeRun]):
     model = ScrapeRun
 
     def create_pending(self, *, trigger: str, celery_task_id: str | None = None) -> ScrapeRun:
-        """Новий запуск у статусі 'pending'. Лічильники беруть дефолти з моделі."""
+        """Start a run in 'pending'; counters fall back to the model defaults."""
         return self.add(
             ScrapeRun(status="pending", trigger=trigger, celery_task_id=celery_task_id)
         )
 
     def mark_running(self, run: ScrapeRun) -> ScrapeRun:
-        """Об'єкт уже під наглядом сесії — досить присвоїти поля.
-        UPDATE SQLAlchemy згенерує сам при flush."""
         run.status = "running"
         run.started_at = datetime.now(UTC)
         self.db.flush()
@@ -43,7 +35,6 @@ class ScrapeRunRepository(BaseRepository[ScrapeRun]):
         trends_collected: int = 0,
         scores_created: int = 0,
     ) -> ScrapeRun:
-        """Фінальний статус + лічильники + finished_at."""
         run.status = status
         run.error = error
         run.products_found = products_found
@@ -56,15 +47,9 @@ class ScrapeRunRepository(BaseRepository[ScrapeRun]):
         return run
 
     def get_last(self) -> ScrapeRun | None:
-        """Найсвіжіший запуск — для кнопки в панелі."""
         stmt = select(ScrapeRun).order_by(ScrapeRun.id.desc()).limit(1)
         return self.db.scalar(stmt)
 
     def list_recent(self, *, limit: int = 20) -> list[ScrapeRun]:
-        """Історія запусків, від нових до старих.
-
-        id.desc(), а не created_at: два запуски в ту саму секунду дали б
-        однаковий created_at і недетермінований порядок.
-        """
         stmt = select(ScrapeRun).order_by(ScrapeRun.id.desc()).limit(limit)
         return list(self.db.scalars(stmt))

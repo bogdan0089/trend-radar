@@ -7,12 +7,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.models.mixins import TimestampMixin
 
-# Джерело даних. `unavailable` = Google Trends заблокував або не віддав віджет;
-# це не помилка, а зафіксований факт, який скоринг враховує окремо.
 TREND_SOURCES = ("google_trends", "unavailable")
 
 
 class TrendSnapshot(TimestampMixin, Base):
+    """One Google Trends reading for a product keyword."""
+
     __tablename__ = "trend_snapshots"
     __table_args__ = (Index("ix_trend_snapshots_product_collected", "product_id", "collected_at"),)
 

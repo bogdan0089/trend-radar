@@ -11,11 +11,7 @@ RUN_TRIGGERS = ("manual", "schedule")
 
 
 class ScrapeRun(TimestampMixin, Base):
-    """Історія запусків пайплайну.
-
-    Потрібна, щоб кнопка в панелі показувала реальний стан, а не спінер у нікуди,
-    і щоб було видно, коли спрацював антибот.
-    """
+    """Pipeline run history, so the dashboard button can show real progress."""
 
     __tablename__ = "scrape_runs"
 

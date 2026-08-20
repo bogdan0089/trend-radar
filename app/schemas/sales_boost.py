@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PastProductCreate(BaseModel):
-    """Ручне додавання через форму на сторінці Sales Boost."""
+    """Payload of the manual form on the Sales Boost page."""
 
     title: str = Field(min_length=1, max_length=500)
     category: str = Field(min_length=1, max_length=255)
@@ -14,20 +14,16 @@ class PastProductCreate(BaseModel):
     @field_validator("title", "category")
     @classmethod
     def strip_text(cls, value: str) -> str:
-        """' Yoga Mat ' → 'Yoga Mat'. Пробіли по краях ламали б порівняння дублів."""
+        """Trim surrounding whitespace and reject a blank value."""
         cleaned = value.strip()
         if not cleaned:
-            raise ValueError("Поле не може складатись лише з пробілів")
+            raise ValueError("The field cannot consist only of whitespace")
         return cleaned
 
     @field_validator("keywords")
     @classmethod
     def normalize_keywords(cls, values: list[str]) -> list[str]:
-        """Нижній регістр, без порожніх і дублів, не довші за колонку (64).
-
-        Boost порівнює слова точним збігом, тож 'Yoga' і 'yoga' мають стати
-        одним словом ще до збереження.
-        """
+        """Lowercase, drop blanks and duplicates, trim to the column width."""
         seen: set[str] = set()
         result: list[str] = []
         for raw in values:
@@ -56,11 +52,7 @@ class PastProductListResponse(BaseModel):
 
 
 class CsvImportReport(BaseModel):
-    """Звіт імпорту.
-
-    Битий рядок не валить увесь файл: користувач має отримати те, що вдалося
-    прочитати, і список проблем — а не 400 без пояснень.
-    """
+    """Import summary: what was stored, what was skipped and why."""
 
     imported: int
     skipped: int

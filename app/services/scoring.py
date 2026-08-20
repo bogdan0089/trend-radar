@@ -1,34 +1,16 @@
-"""Детермінована формула оцінки товару — fallback без LLM.
-
-Вимога ТЗ: «Якщо ключ відсутній у .env, скоринг працює за детермінованою
-математичною формулою. Проєкт має успішно підніматися без API-ключа».
-
-Модуль чистий: без БД, без мережі, без конфігу. Ті самі входи завжди дають
-той самий бал, тож формула повністю покривається тестами і її можна перевірити
-руками, дивлячись на breakdown.
-"""
+"""Deterministic scoring formula, used whenever no LLM key is configured."""
 
 import math
 from dataclasses import dataclass, field
 
-# Ваги складників. Сума = 100, тож кожен бал видно у відсотках впливу.
 WEIGHT_RATING = 25
 WEIGHT_REVIEWS = 20
 WEIGHT_TREND = 25
 WEIGHT_BOOST = 30
 
-# Скільки відгуків вважаємо «стелею». Далі приріст майже не відчувається:
-# різниця між 100 000 і 500 000 відгуків для рішення баєра неістотна.
 REVIEWS_CEILING = 100_000
-
-# Межі динаміки тренду. -50% і нижче — падіння, +100% і вище — вибух попиту.
-TREND_FLOOR_PCT = -50.0
-TREND_CAP_PCT = 100.0
-
-# Коли даних немає, ставимо нейтраль, а не нуль: новий товар без відгуків
-# не гірший за товар із рейтингом 1.0, про нього просто нічого не відомо.
+TREND_SCALE_PCT = 200.0
 NEUTRAL_FACTOR = 0.5
-
 MAX_BOOST_POINTS = 30
 
 
@@ -47,16 +29,13 @@ def calculate_fallback_score(
     trend_delta_pct: float | None,
     boost_score: int,
     boost_explanation: str = "",
+    trend_unreliable: bool = False,
 ) -> ScoreResult:
-    """Бал 0–100 і текстове пояснення.
-
-    `trend_delta_pct=None` означає «Google Trends не дав даних» — це не те саме,
-    що нульова динаміка, тому такий випадок отримує нейтраль і окремий рядок
-    у поясненні.
-    """
+    """Return a 0-100 score and its explanation; an unknown trend scores neutral."""
     rating_factor = NEUTRAL_FACTOR if rating is None else _clamp(rating / 5)
     reviews_factor = _reviews_factor(reviews_count)
-    trend_factor = NEUTRAL_FACTOR if trend_delta_pct is None else _trend_factor(trend_delta_pct)
+    trend_known = trend_delta_pct is not None and not trend_unreliable
+    trend_factor = _trend_factor(trend_delta_pct) if trend_known else NEUTRAL_FACTOR
     boost_factor = _clamp(boost_score / MAX_BOOST_POINTS)
 
     breakdown = {
@@ -74,6 +53,7 @@ def calculate_fallback_score(
             rating=rating,
             reviews_count=reviews_count,
             trend_delta_pct=trend_delta_pct,
+            trend_unreliable=trend_unreliable,
             boost_score=boost_score,
             boost_explanation=boost_explanation,
             breakdown=breakdown,
@@ -83,20 +63,18 @@ def calculate_fallback_score(
 
 
 def _reviews_factor(count: int) -> float:
-    """Логарифмічна шкала.
-
-    Лінійна була б непридатною: різниця між 10 і 1 000 відгуками величезна,
-    а між 90 000 і 100 000 — ніяка. Логарифм саме це й відображає.
-    """
+    """Map a review count onto 0..1 on a logarithmic scale."""
     if count <= 0:
         return 0.0
     return _clamp(math.log10(1 + count) / math.log10(1 + REVIEWS_CEILING))
 
 
 def _trend_factor(delta_pct: float) -> float:
-    """Динаміку -50%..+100% розтягуємо в 0..1, за межами — плато."""
-    bounded = max(TREND_FLOOR_PCT, min(TREND_CAP_PCT, delta_pct))
-    return (bounded - TREND_FLOOR_PCT) / (TREND_CAP_PCT - TREND_FLOOR_PCT)
+    """Map demand change onto 0..1, where 0.5 means "at the yearly average"."""
+    magnitude = _clamp(
+        math.log10(1 + abs(delta_pct) / 10) / math.log10(1 + TREND_SCALE_PCT / 10)
+    )
+    return _clamp(0.5 + 0.5 * math.copysign(magnitude, delta_pct))
 
 
 def _clamp(value: float) -> float:
@@ -109,41 +87,43 @@ def _build_reasoning(
     rating: float | None,
     reviews_count: int,
     trend_delta_pct: float | None,
+    trend_unreliable: bool,
     boost_score: int,
     boost_explanation: str,
     breakdown: dict[str, float],
 ) -> str:
-    """Пояснення, з якого видно кожен доданок.
-
-    Це вимога ТЗ (`reasoning`) і водночас спосіб перевірити оцінку руками:
-    цифри в тексті мають збігатися з breakdown.
-    """
-    lines = [f"Оцінка розрахована формулою (без LLM) для «{title[:80]}»."]
+    """Build an explanation in which every term of the breakdown is visible."""
+    lines = [f"Score computed by the formula (no LLM) for '{title[:80]}'."]
 
     if rating is None:
-        lines.append(f"Рейтинг невідомий — нейтральні {breakdown['rating']} з {WEIGHT_RATING}.")
+        lines.append(f"Rating unknown, neutral {breakdown['rating']} of {WEIGHT_RATING}.")
     else:
-        lines.append(f"Рейтинг {rating}/5 → {breakdown['rating']} з {WEIGHT_RATING}.")
+        lines.append(f"Rating {rating}/5 gives {breakdown['rating']} of {WEIGHT_RATING}.")
 
     lines.append(
-        f"Відгуків {reviews_count:,} (логарифмічна шкала) → "
-        f"{breakdown['reviews']} з {WEIGHT_REVIEWS}.".replace(",", " ")
+        f"Reviews {reviews_count:,} (logarithmic scale) give "
+        f"{breakdown['reviews']} of {WEIGHT_REVIEWS}.".replace(",", " ")
     )
 
     if trend_delta_pct is None:
         lines.append(
-            f"Google Trends даних не дав — нейтральні {breakdown['trend']} з {WEIGHT_TREND}."
+            f"Google Trends returned no data, neutral {breakdown['trend']} of {WEIGHT_TREND}."
+        )
+    elif trend_unreliable:
+        lines.append(
+            f"Google Trends shows {trend_delta_pct:+.1f}%, but on a nearly empty search "
+            f"history, so it is not counted: neutral {breakdown['trend']} of {WEIGHT_TREND}."
         )
     else:
-        direction = "зростає" if trend_delta_pct >= 0 else "спадає"
+        direction = "rising" if trend_delta_pct >= 0 else "falling"
         lines.append(
-            f"Попит {direction} на {abs(trend_delta_pct):.1f}% від середнього за рік → "
-            f"{breakdown['trend']} з {WEIGHT_TREND}."
+            f"Demand {direction} {abs(trend_delta_pct):.1f}% against the yearly average gives "
+            f"{breakdown['trend']} of {WEIGHT_TREND}."
         )
 
     if boost_score > 0:
-        lines.append(f"{boost_explanation} → {breakdown['boost']} з {WEIGHT_BOOST}.")
+        lines.append(f"{boost_explanation} That gives {breakdown['boost']} of {WEIGHT_BOOST}.")
     else:
-        lines.append(f"Збігів із нашими минулими товарами немає → 0 з {WEIGHT_BOOST}.")
+        lines.append(f"No matches with our past products, 0 of {WEIGHT_BOOST}.")
 
     return " ".join(lines)

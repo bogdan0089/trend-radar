@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 
 class HealthRepository:
-    """Єдине, що вміє — перевірити, що конекшн до БД живий."""
+    """Checks that the database connection is alive."""
 
     def __init__(self, db: Session) -> None:
         self.db = db

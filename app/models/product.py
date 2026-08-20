@@ -8,16 +8,13 @@ from app.models.mixins import TimestampMixin
 
 
 class Product(TimestampMixin, Base):
-    """Товар з Amazon. Сім полів з ТЗ — обовʼязкові до збереження."""
+    """An Amazon product. Carries the seven fields required by the spec."""
 
     __tablename__ = "products"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-
-    # Ключ дедуплікації між запусками скрапера
     asin: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
 
-    # 7 полів з ТЗ
     title: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)

@@ -8,9 +8,11 @@ _CONFIGURED = False
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+_NOISY_LOGGERS = ("sqlalchemy.engine", "httpx")
+
 
 def configure_logging() -> None:
-    """Єдина точка налаштування логів — для API, воркера і beat."""
+    """Configure logging once for API, worker and beat."""
     global _CONFIGURED
     if _CONFIGURED:
         return
@@ -22,9 +24,8 @@ def configure_logging() -> None:
     root.handlers = [handler]
     root.setLevel(settings.log_level.upper())
 
-    # Ці двоє надто балакучі на INFO
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
     _CONFIGURED = True
 

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import literal_column, select
+from sqlalchemy import delete, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
@@ -11,8 +11,6 @@ from app.models.score import Score
 from app.models.trend import TrendSnapshot
 from app.repositories.base import BaseRepository
 
-# Що перезаписуємо, коли товар уже в базі.
-# first_seen_at не чіпаємо — це дата, коли ми побачили товар уперше.
 _UPDATABLE_FIELDS = (
     "title",
     "category",
@@ -23,18 +21,19 @@ _UPDATABLE_FIELDS = (
     "product_url",
     "image_url",
     "last_seen_at",
+    "source",
 )
 
 
 @dataclass(frozen=True, slots=True)
 class UpsertResult:
     product_id: int
-    created: bool  # True — товар зʼявився вперше, False — оновили наявний
+    created: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ProductRow:
-    """Рядок дашборду: товар + остання оцінка + свіжий тренд."""
+    """Dashboard row: a product with its latest score and trend reading."""
 
     product: Product
     score: Score | None
@@ -45,15 +44,7 @@ class ProductRepository(BaseRepository[Product]):
     model = Product
 
     def upsert_many(self, rows: list[dict[str, Any]]) -> list[UpsertResult]:
-        """Вставляє або оновлює пачку товарів ОДНИМ запитом.
-
-        Ключ конфлікту — унікальний asin: той самий товар у наступному запуску
-        не створить дубль, а оновить ціну, рейтинг і last_seen_at.
-
-        У rows не повинно бути двох рядків з однаковим asin — Postgres на це
-        відповідає «ON CONFLICT DO UPDATE cannot affect row a second time».
-        Дедуплікація — робота сервісу.
-        """
+        """Insert or update products in one statement; rows must be unique by asin."""
         if not rows:
             return []
 
@@ -66,9 +57,6 @@ class ProductRepository(BaseRepository[Product]):
             set_={field: insert_stmt.excluded[field] for field in _UPDATABLE_FIELDS},
         ).returning(
             Product.id,
-            # xmax — id транзакції, яка сховала стару версію рядка. При INSERT
-            # ховати нічого, тож xmax = 0. Єдиний спосіб відрізнити вставку
-            # від оновлення всередині одного запиту.
             literal_column("xmax = 0").label("created"),
         )
 
@@ -77,18 +65,19 @@ class ProductRepository(BaseRepository[Product]):
             for row in self.db.execute(stmt)
         ]
 
+    def delete_by_source(self, source: str) -> int:
+        """Delete every product from one source; scores and trends cascade."""
+        result = self.db.execute(delete(Product).where(Product.source == source))
+        return result.rowcount or 0
+
     def list_by_ids(self, product_ids: list[int]) -> list[Product]:
-        """Товари за списком id — одним запитом, без циклу з get() на кожен."""
+        """Fetch products by id in one query rather than a get() per id."""
         if not product_ids:
             return []
         return list(self.db.scalars(select(Product).where(Product.id.in_(product_ids))))
 
     def list_with_latest_score(self, *, limit: int = 50, offset: int = 0) -> list[ProductRow]:
-        """Список для дашборду, найперспективніші зверху.
-
-        LEFT JOIN, а не INNER: товар щойно спарсили, скоринг ще не відпрацював —
-        він має показатись без оцінки, а не зникнути зі списку.
-        """
+        """Dashboard listing, highest scored first. Unscored products still appear."""
         score = aliased(Score, self._latest_per_product(Score))
         trend = aliased(TrendSnapshot, self._latest_per_product(TrendSnapshot))
 
@@ -108,12 +97,7 @@ class ProductRepository(BaseRepository[Product]):
 
     @staticmethod
     def _latest_per_product(model: type) -> Any:
-        """Підзапит «останній рядок на кожен product_id».
-
-        DISTINCT ON — розширення Postgres: у кожній групі лишає перший рядок
-        за порядком з ORDER BY. Без нього довелось би тягнути оцінку окремим
-        запитом на кожен товар (N+1).
-        """
+        """Subquery returning the newest row per product_id."""
         return (
             select(model)
             .distinct(model.product_id)

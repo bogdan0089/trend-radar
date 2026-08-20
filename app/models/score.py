@@ -5,11 +5,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.models.mixins import TimestampMixin
 
-# Хто порахував оцінку. fallback = детермінована формула без LLM.
-SCORE_PROVIDERS = ("anthropic", "openai", "fallback")
+SCORE_PROVIDERS = ("anthropic", "openai", "gemini", "grok", "fallback")
 
 
 class Score(TimestampMixin, Base):
+    """A product rating produced either by an LLM or by the fallback formula."""
+
     __tablename__ = "scores"
     __table_args__ = (
         CheckConstraint("score >= 0 AND score <= 100", name="ck_scores_range"),
@@ -20,12 +21,10 @@ class Score(TimestampMixin, Base):
         ForeignKey("products.id", ondelete="CASCADE"), index=True, nullable=False
     )
 
-    # Обовʼязкові за ТЗ
     score: Mapped[int] = mapped_column(Integer, nullable=False)
     reasoning: Mapped[str] = mapped_column(Text, nullable=False)
 
     provider: Mapped[str] = mapped_column(String(32), default="fallback", nullable=False)
-    # Розклад балу по складниках — і для UI, і щоб оцінку можна було перевірити
     breakdown: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     boost_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
