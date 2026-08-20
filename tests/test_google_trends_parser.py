@@ -1,4 +1,4 @@
-"""Тести розбору відповіді Google Trends. Браузер не запускається."""
+"""Tests for Google Trends response parsing. No browser is started."""
 
 import json
 
@@ -7,7 +7,6 @@ import pytest
 from app.core.exceptions import ExternalServiceError
 from app.integrations.google_trends import parse_widget_payload
 
-# Google префіксує JSON цим рядком — захист від JSON hijacking
 PREFIX = ")]}',\n"
 
 
@@ -18,7 +17,7 @@ def payload(values: list[int]) -> str:
 
 class TestParsing:
     def test_computes_average_and_recent_interest(self):
-        """Останні 4 точки ≈ останній місяць, решта — база для порівняння."""
+        """The last four points are roughly the last month; the rest is the base."""
         result = parse_widget_payload(payload([20, 20, 20, 20, 40, 40, 40, 40]), keyword="yoga")
 
         assert result.interest_avg == 30.0
@@ -40,7 +39,7 @@ class TestParsing:
 
 class TestEdgeCases:
     def test_flat_zero_interest_gives_zero_delta(self):
-        """Ділити на нуль не можна, і зростання тут теж немає."""
+        """No division by zero, and there is no growth to express either."""
         result = parse_widget_payload(payload([0, 0, 0, 0]), keyword="dead")
         assert result.delta_pct == 0.0
         assert result.interest_avg == 0.0
@@ -59,20 +58,19 @@ class TestEdgeCases:
 
 class TestBrokenResponses:
     def test_empty_timeline_raises(self):
-        """Порожній ряд — це «даних немає», і краще чесно записати
-        'unavailable', ніж вигадати нулі."""
-        with pytest.raises(ExternalServiceError, match="не має даних"):
+        """An empty series means no data, not zero demand."""
+        with pytest.raises(ExternalServiceError, match="has no data"):
             parse_widget_payload(payload([]), keyword="unknown")
 
     def test_broken_json_raises(self):
-        with pytest.raises(ExternalServiceError, match="неочікуваний формат"):
+        with pytest.raises(ExternalServiceError, match="unexpected format"):
             parse_widget_payload(PREFIX + "{not json", keyword="x")
 
     def test_missing_keys_raise(self):
-        with pytest.raises(ExternalServiceError, match="неочікуваний формат"):
+        with pytest.raises(ExternalServiceError, match="unexpected format"):
             parse_widget_payload(PREFIX + json.dumps({"something": "else"}), keyword="x")
 
     def test_html_instead_of_json_raises(self):
-        """Google інколи віддає сторінку капчі замість JSON."""
+        """Google sometimes returns a captcha page instead of JSON."""
         with pytest.raises(ExternalServiceError):
             parse_widget_payload("<html><body>captcha</body></html>", keyword="x")
