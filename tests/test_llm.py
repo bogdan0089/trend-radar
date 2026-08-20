@@ -121,7 +121,7 @@ class TestProviderResponseShapes:
         captured_post["response"] = {
             "candidates": [{"content": {"parts": [{"text": '{"score": 61, "reasoning": "ok"}'}]}}]
         }
-        client = GeminiClient(api_key="secret-key", model="gemini-2.5-flash", timeout=5)
+        client = GeminiClient(api_key="secret-key", model="gemini-3.6-flash", timeout=5)
 
         assert parse_verdict(client.complete(system="s", prompt="p")).score == 61
         assert "key=secret-key" in captured_post["url"]

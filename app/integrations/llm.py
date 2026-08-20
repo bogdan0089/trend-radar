@@ -25,7 +25,7 @@ GEMINI_URL_TEMPLATE = (
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-5",
     "openai": "gpt-4o-mini",
-    "gemini": "gemini-2.5-flash",
+    "gemini": "gemini-3.6-flash",
     "grok": "grok-4",
 }
 
