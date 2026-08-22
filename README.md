@@ -229,7 +229,7 @@ pytest -q
 ruff check .
 ```
 
-185 tests. The database tests need Postgres because the code relies on JSONB,
+211 tests. The database tests need Postgres because the code relies on JSONB,
 ARRAY and `DISTINCT ON`, none of which SQLite provides. Without a database they
 skip, so the pure unit tests still run anywhere — except in CI, where
 `REQUIRE_TEST_DB=1` turns that skip into a failure. A green CI run that quietly
@@ -292,6 +292,7 @@ Before exposing it publicly:
 app/
   api/
     routers/       HTTP endpoints, one module per resource
+    dependencies/  FastAPI dependencies, e.g. auth.py: JWT → User
     routes.py      collects the routers into one api_router
   services/        business logic
   repositories/    database access
@@ -303,13 +304,12 @@ app/
     tasks/         the tasks themselves
   utils/
     keywords.py    keyword extraction (pure, no I/O)
-    deps.py        FastAPI dependency: JWT → User
   core/            config, logging, security, exceptions
   seed_data/       bundled Amazon snapshot for the fallback
 alembic/           migrations
 frontend/          Vue 3 SPA served by nginx
 scripts/           smoke.sh, check_seed.py
-tests/             185 tests
+tests/             211 tests
 ```
 
 ## Stack
