@@ -1,9 +1,11 @@
 """Product scoring: an LLM when configured, the deterministic formula otherwise."""
 
+import time
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.exceptions import ExternalServiceError
 from app.core.logging import get_logger
 from app.integrations.google_trends import MIN_RELIABLE_INTEREST
@@ -27,12 +29,22 @@ _SYSTEM_PROMPT = (
     "In the reasoning cite the concrete numbers you relied on."
 )
 
+# One run scores up to 40 products one after another, and a slow or retrying
+# provider can spend the whole Celery soft limit on them. Once the budget is
+# gone the rest fall to the formula, so the run still finishes and every product
+# still carries a score.
+_BUDGET_NOTE = (
+    "The LLM was not asked for this product: the run had spent its scoring time "
+    "budget, so the deterministic formula was used instead."
+)
+
 
 @dataclass
 class ScoringOutcome:
     created: int = 0
     by_llm: int = 0
     by_fallback: int = 0
+    out_of_budget: int = 0
 
 
 class ScoringService:
@@ -42,6 +54,7 @@ class ScoringService:
         llm: LLMClient | None = None,
         *,
         use_llm: bool = True,
+        budget_seconds: float | None = None,
     ) -> None:
         """`use_llm=False` forces the formula even when a key is configured."""
         self.db = db
@@ -50,6 +63,9 @@ class ScoringService:
         self.scores = ScoreRepository(db)
         self.boost = BoostService(db)
         self.llm = llm if llm is not None else (build_client() if use_llm else None)
+        self.budget_seconds = (
+            settings.scoring_budget_seconds if budget_seconds is None else budget_seconds
+        )
 
     def score_products(self, product_ids: list[int]) -> ScoringOutcome:
         products = self.products.list_by_ids(product_ids)
@@ -59,12 +75,26 @@ class ScoringService:
         trends = self.trends.latest_by_products([p.id for p in products])
         self.boost.index()
 
+        deadline = time.monotonic() + self.budget_seconds
         outcome = ScoringOutcome()
+
         for product in products:
             delta, unreliable = self._read_trend(trends.get(product.id))
             boost = self.boost.calculate(title=product.title, category=product.category)
 
-            result, provider = self._evaluate(product, delta, unreliable, boost)
+            allow_llm = time.monotonic() < deadline
+            if not allow_llm and self.llm is not None:
+                outcome.out_of_budget += 1
+                if outcome.out_of_budget == 1:
+                    logger.warning(
+                        "Scoring: the %.0fs budget is spent, the remaining products "
+                        "are scored by the formula",
+                        self.budget_seconds,
+                    )
+
+            result, provider = self._evaluate(
+                product, delta, unreliable, boost, allow_llm=allow_llm
+            )
             self.scores.create(
                 product_id=product.id,
                 score=result.score,
@@ -82,10 +112,11 @@ class ScoringService:
 
         self.db.commit()
         logger.info(
-            "Scoring: %d ratings (LLM %d, formula %d)",
+            "Scoring: %d ratings (LLM %d, formula %d, of which %d out of budget)",
             outcome.created,
             outcome.by_llm,
             outcome.by_fallback,
+            outcome.out_of_budget,
         )
         return outcome
 
@@ -101,7 +132,13 @@ class ScoringService:
         return snapshot.delta_pct, unreliable
 
     def _evaluate(
-        self, product: Product, delta: float | None, unreliable: bool, boost: BoostResult
+        self,
+        product: Product,
+        delta: float | None,
+        unreliable: bool,
+        boost: BoostResult,
+        *,
+        allow_llm: bool = True,
     ) -> tuple[ScoreResult, str]:
         fallback = calculate_fallback_score(
             title=product.title,
@@ -115,6 +152,9 @@ class ScoringService:
 
         if self.llm is None:
             return fallback, "fallback"
+
+        if not allow_llm:
+            return self._with_note(fallback, _BUDGET_NOTE), "fallback"
 
         try:
             raw = self.llm.complete(
@@ -137,6 +177,15 @@ class ScoringService:
                 breakdown=fallback.breakdown,
             ),
             self.llm.provider,
+        )
+
+    @staticmethod
+    def _with_note(result: ScoreResult, note: str) -> ScoreResult:
+        """The same score, with a line saying why the LLM was not asked."""
+        return ScoreResult(
+            score=result.score,
+            reasoning=f"{result.reasoning} {note}",
+            breakdown=result.breakdown,
         )
 
     @staticmethod

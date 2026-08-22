@@ -175,6 +175,14 @@ turns into a silent zero.
 
 Supported providers: `anthropic`, `openai`, `gemini`, `grok`, `none`.
 
+**Time budget.** Those 40 products are scored one after another, so a slow
+provider — 30 s per call, three attempts on a 429 — could spend the whole Celery
+soft limit on scoring alone and have the task killed mid-run. Scoring therefore
+has its own budget (`SCORING_BUDGET_SECONDS`, 15 minutes by default). Once it is
+gone the remaining products are scored by the formula and their reasoning says
+so, which keeps the guarantee that a run always finishes and every product
+carries a score.
+
 **Rate limits.** One run scores up to 40 products back to back, which is enough
 to hit the quota on a provider's free tier. A `429` or a 5xx is retried twice
 with a short backoff, honouring `Retry-After` when the provider sends it; a
@@ -193,6 +201,7 @@ whole stack. The settings worth knowing:
 | --- | --- | --- |
 | `LLM_PROVIDER` | `none` | `none` = deterministic formula, no key required |
 | `LLM_API_KEY` | empty | provider key; empty also falls back to the formula |
+| `SCORING_BUDGET_SECONDS` | `900` | how long one run may spend asking the LLM; after that the rest is scored by the formula |
 | `AMAZON_CATEGORY_URLS` | 5 category pages | comma separated |
 | `SCRAPE_MAX_PRODUCTS` | `8` | **per category**, so 5 × 8 = 40 per run |
 | `SCRAPE_INTERVAL_HOURS` | `6` | the Celery Beat schedule |
