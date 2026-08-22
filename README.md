@@ -99,6 +99,14 @@ Every stage writes its counters onto a `ScrapeRun` row, so the UI shows real
 progress instead of an indefinite spinner, and a blocked scraper is visible
 rather than silently reported as success.
 
+**What is asked of Google Trends.** The query is the product *type*, not the
+listing. English product names are head-final, so the type is at the end while
+the brand and model open the title — and a model number is exactly what Trends
+has no data for. "Ninja AF101 Air Fryer, 4 Quart Capacity" is therefore asked
+about as `air fryer`, not `ninja af101 air`. Specification tails, bracketed
+model notes, sizes and accessory clauses ("with Alexa Voice Remote") are cut
+before the trailing words are taken.
+
 ### Layers
 
 | Layer | Responsibility | Never does |
@@ -229,7 +237,7 @@ pytest -q
 ruff check .
 ```
 
-211 tests. The database tests need Postgres because the code relies on JSONB,
+219 tests. The database tests need Postgres because the code relies on JSONB,
 ARRAY and `DISTINCT ON`, none of which SQLite provides. Without a database they
 skip, so the pure unit tests still run anywhere — except in CI, where
 `REQUIRE_TEST_DB=1` turns that skip into a failure. A green CI run that quietly
@@ -309,7 +317,7 @@ app/
 alembic/           migrations
 frontend/          Vue 3 SPA served by nginx
 scripts/           smoke.sh, check_seed.py
-tests/             211 tests
+tests/             219 tests
 ```
 
 ## Stack
