@@ -110,8 +110,11 @@ class PipelineService:
             counters = self._run_stages(counters)
         except DomainError as exc:
             logger.exception("Pipeline %d failed", run_id)
-            self.runs.mark_finished(run, status="failed", error=str(exc)[:2000])
-            self.db.commit()
+            self._record_failure(run, str(exc))
+            raise
+        except Exception as exc:
+            logger.exception("Pipeline %d crashed unexpectedly", run_id)
+            self._record_failure(run, f"Unexpected error: {type(exc).__name__}: {exc}")
             raise
 
         status, note = self._resolve_status(counters)
@@ -129,6 +132,17 @@ class PipelineService:
 
         logger.info("Pipeline %d finished with status %s", run_id, status)
         return run
+
+    def _record_failure(self, run: ScrapeRun, message: str) -> None:
+        """Mark a run failed. Rolls back first: a database error leaves the
+        session unusable, and the write recording the failure would fail too."""
+        self.db.rollback()
+        try:
+            self.runs.mark_finished(run, status="failed", error=message[:2000])
+            self.db.commit()
+        except Exception:
+            logger.exception("Pipeline: could not record the failure of run %d", run.id)
+            self.db.rollback()
 
     def _run_stages(self, counters: _Counters) -> _Counters:
         scrape = ScrapeService(self.db).collect()
