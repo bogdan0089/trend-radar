@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.core.exceptions import ScrapingError
 from app.repositories.scrape_run import ScrapeRunRepository
 from app.services.pipeline_service import STALE_AFTER, PipelineService
 
@@ -70,6 +71,66 @@ class TestLatest:
         make_run(db_session, status="running", age=timedelta(minutes=1))
 
         assert service.latest().status == "running"
+
+
+class TestExecuteFailure:
+    """Whatever goes wrong, the run must reach a finished state.
+
+    Only DomainError used to be caught, so an unexpected crash left the row on
+    'running' and active_run() blocked the dashboard button for STALE_AFTER.
+    """
+
+    def test_a_domain_error_marks_the_run_failed(self, db_session, service, monkeypatch):
+        run = ScrapeRunRepository(db_session).create_pending(trigger="manual")
+        db_session.commit()
+
+        def raise_domain(self, counters):
+            raise ScrapingError("Amazon blocked the request")
+
+        monkeypatch.setattr(PipelineService, "_run_stages", raise_domain)
+
+        with pytest.raises(ScrapingError):
+            service.execute(run.id)
+
+        db_session.refresh(run)
+        assert run.status == "failed"
+        assert "blocked" in run.error
+        assert run.finished_at is not None
+
+    def test_an_unexpected_error_also_marks_the_run_failed(
+        self, db_session, service, monkeypatch
+    ):
+        run = ScrapeRunRepository(db_session).create_pending(trigger="manual")
+        db_session.commit()
+
+        def crash(self, counters):
+            raise RuntimeError("chromium died")
+
+        monkeypatch.setattr(PipelineService, "_run_stages", crash)
+
+        with pytest.raises(RuntimeError):
+            service.execute(run.id)
+
+        db_session.refresh(run)
+        assert run.status == "failed"
+        assert "RuntimeError" in run.error
+        assert "chromium died" in run.error
+        assert run.finished_at is not None
+
+    def test_the_button_is_free_again_after_a_crash(self, db_session, service, monkeypatch):
+        """The point of the fix: a crash must not hold the button for 35 minutes."""
+        run = ScrapeRunRepository(db_session).create_pending(trigger="manual")
+        db_session.commit()
+
+        def crash(self, counters):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(PipelineService, "_run_stages", crash)
+
+        with pytest.raises(RuntimeError):
+            service.execute(run.id)
+
+        assert service.active_run() is None
 
 
 class TestStartManualRun:
