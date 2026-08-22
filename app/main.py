@@ -41,7 +41,15 @@ app.add_middleware(
 def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     if exc.http_status_code >= 500:
         logger.exception("Unhandled domain error at %s", request.url.path)
-    return JSONResponse(status_code=exc.http_status_code, content={"detail": str(exc)})
+
+    # RFC 9110 requires a 401 to name the scheme the client should use.
+    headers = {"WWW-Authenticate": "Bearer"} if exc.http_status_code == 401 else None
+
+    return JSONResponse(
+        status_code=exc.http_status_code,
+        content={"detail": str(exc)},
+        headers=headers,
+    )
 
 
 app.include_router(api_router)

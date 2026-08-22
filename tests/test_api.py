@@ -106,6 +106,25 @@ class TestAuthorizationWall:
 
         assert client.get("/api/products", headers=auth_headers).status_code == 401
 
+    def test_a_rejection_names_the_scheme(self, client):
+        """RFC 9110: a 401 must say which scheme to authenticate with.
+
+        The dependency raises a domain error now instead of building its own
+        HTTPException, so the header has to come from the exception handler.
+        """
+        response = client.get("/api/products")
+
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+
+    @pytest.mark.parametrize(("method", "path"), PROTECTED_ENDPOINTS)
+    def test_every_rejection_reads_the_same(self, client, method, path):
+        """No token, a broken token and a deleted user answer identically, so
+        the response cannot be used to probe which part failed."""
+        no_token = getattr(client, method)(path)
+        broken = getattr(client, method)(path, headers={"Authorization": "Bearer nope"})
+
+        assert no_token.json()["detail"] == broken.json()["detail"]
+
 
 class TestProducts:
     def test_empty_list_has_the_pagination_envelope(self, client, auth_headers):

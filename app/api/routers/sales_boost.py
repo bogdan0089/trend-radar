@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.dependencies.auth import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.sales_boost import (
@@ -10,7 +11,6 @@ from app.schemas.sales_boost import (
     PastProductRead,
 )
 from app.services.past_product_service import PastProductService
-from app.utils.deps import get_current_user
 
 router_sales_boost = APIRouter(prefix="/api/sales-boost", tags=["sales-boost"])
 
