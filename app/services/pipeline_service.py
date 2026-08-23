@@ -27,6 +27,7 @@ class _Counters:
     scores_created: int = 0
     used_snapshot: bool = False
     failed_categories: dict[str, str] = field(default_factory=dict)
+    trends_error: str | None = None
 
 
 class PipelineService:
@@ -110,25 +111,55 @@ class PipelineService:
             counters = self._run_stages(counters)
         except DomainError as exc:
             logger.exception("Pipeline %d failed", run_id)
-            self.runs.mark_finished(run, status="failed", error=str(exc)[:2000])
-            self.db.commit()
+            self._record_failure(run, str(exc), counters)
+            raise
+        except Exception as exc:
+            logger.exception("Pipeline %d crashed unexpectedly", run_id)
+            self._record_failure(run, f"Unexpected error: {type(exc).__name__}: {exc}", counters)
             raise
 
         status, note = self._resolve_status(counters)
         self.runs.mark_finished(
-            run,
-            status=status,
-            error=note,
-            products_found=counters.products_found,
-            products_created=counters.products_created,
-            products_updated=counters.products_updated,
-            trends_collected=counters.trends_collected,
-            scores_created=counters.scores_created,
+            run, status=status, error=note, **self._counters_as_fields(counters)
         )
         self.db.commit()
 
         logger.info("Pipeline %d finished with status %s", run_id, status)
         return run
+
+    @staticmethod
+    def _counters_as_fields(counters: _Counters) -> dict[str, int]:
+        """The counter arguments mark_finished expects, shared by both exits."""
+        return {
+            "products_found": counters.products_found,
+            "products_created": counters.products_created,
+            "products_updated": counters.products_updated,
+            "trends_collected": counters.trends_collected,
+            "scores_created": counters.scores_created,
+        }
+
+    def _record_failure(self, run: ScrapeRun, message: str, counters: _Counters) -> None:
+        """Mark a run failed, keeping what the stages did manage to do.
+
+        `mark_finished` defaults every counter to zero, so a run that scraped 40
+        products and then crashed would report nothing at all. `_run_stages`
+        mutates the counters in place, so the partial totals survive the raise.
+
+        Rolls back first: a database error leaves the session unusable, and the
+        write recording the failure would fail too.
+        """
+        self.db.rollback()
+        try:
+            self.runs.mark_finished(
+                run,
+                status="failed",
+                error=message[:2000],
+                **self._counters_as_fields(counters),
+            )
+            self.db.commit()
+        except Exception:
+            logger.exception("Pipeline: could not record the failure of run %d", run.id)
+            self.db.rollback()
 
     def _run_stages(self, counters: _Counters) -> _Counters:
         scrape = ScrapeService(self.db).collect()
@@ -141,8 +172,16 @@ class PipelineService:
         if not scrape.product_ids:
             return counters
 
-        trends = TrendsService(self.db).collect_for_products(scrape.product_ids)
-        counters.trends_collected = trends.collected
+        try:
+            trends = TrendsService(self.db).collect_for_products(scrape.product_ids)
+            counters.trends_collected = trends.collected
+        except Exception as exc:
+            # Trends are one signal out of four, and the formula already scores a
+            # missing trend as neutral. Losing the whole stage must not cost the
+            # run its scores, so it degrades to 'partial' and scoring goes on.
+            logger.exception("Pipeline: the trends stage failed, scoring without it")
+            self.db.rollback()
+            counters.trends_error = f"{type(exc).__name__}: {exc}"
 
         scoring = ScoringService(self.db).score_products(scrape.product_ids)
         counters.scores_created = scoring.created
@@ -151,12 +190,23 @@ class PipelineService:
 
     @staticmethod
     def _resolve_status(counters: _Counters) -> tuple[str, str | None]:
-        """Report 'success' only when live data came back from every category."""
+        """Report 'success' only when every stage returned live data.
+
+        Reasons accumulate: a blocked scraper and dead trends in the same run
+        must both reach the dashboard, not just whichever was checked first.
+        """
+        notes: list[str] = []
+
         if counters.used_snapshot:
-            return "partial", "Amazon blocked the request, data taken from the demo snapshot"
-        if counters.products_found == 0:
-            return "partial", "The page opened but no products could be parsed"
-        if counters.failed_categories:
-            failed = ", ".join(counters.failed_categories)
-            return "partial", f"Categories that failed: {failed}"[:2000]
-        return "success", None
+            notes.append("Amazon blocked the request, data taken from the demo snapshot")
+        elif counters.products_found == 0:
+            notes.append("The page opened but no products could be parsed")
+        elif counters.failed_categories:
+            notes.append(f"Categories that failed: {', '.join(counters.failed_categories)}")
+
+        if counters.trends_error:
+            notes.append(f"Google Trends unavailable: {counters.trends_error}")
+
+        if not notes:
+            return "success", None
+        return "partial", "; ".join(notes)[:2000]

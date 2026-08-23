@@ -99,6 +99,14 @@ Every stage writes its counters onto a `ScrapeRun` row, so the UI shows real
 progress instead of an indefinite spinner, and a blocked scraper is visible
 rather than silently reported as success.
 
+**What is asked of Google Trends.** The query is the product *type*, not the
+listing. English product names are head-final, so the type is at the end while
+the brand and model open the title — and a model number is exactly what Trends
+has no data for. "Ninja AF101 Air Fryer, 4 Quart Capacity" is therefore asked
+about as `air fryer`, not `ninja af101 air`. Specification tails, bracketed
+model notes, sizes and accessory clauses ("with Alexa Voice Remote") are cut
+before the trailing words are taken.
+
 ### Layers
 
 | Layer | Responsibility | Never does |
@@ -175,6 +183,14 @@ turns into a silent zero.
 
 Supported providers: `anthropic`, `openai`, `gemini`, `grok`, `none`.
 
+**Time budget.** Those 40 products are scored one after another, so a slow
+provider — 30 s per call, three attempts on a 429 — could spend the whole Celery
+soft limit on scoring alone and have the task killed mid-run. Scoring therefore
+has its own budget (`SCORING_BUDGET_SECONDS`, 15 minutes by default). Once it is
+gone the remaining products are scored by the formula and their reasoning says
+so, which keeps the guarantee that a run always finishes and every product
+carries a score.
+
 **Rate limits.** One run scores up to 40 products back to back, which is enough
 to hit the quota on a provider's free tier. A `429` or a 5xx is retried twice
 with a short backoff, honouring `Retry-After` when the provider sends it; a
@@ -193,6 +209,7 @@ whole stack. The settings worth knowing:
 | --- | --- | --- |
 | `LLM_PROVIDER` | `none` | `none` = deterministic formula, no key required |
 | `LLM_API_KEY` | empty | provider key; empty also falls back to the formula |
+| `SCORING_BUDGET_SECONDS` | `900` | how long one run may spend asking the LLM; after that the rest is scored by the formula |
 | `AMAZON_CATEGORY_URLS` | 5 category pages | comma separated |
 | `SCRAPE_MAX_PRODUCTS` | `8` | **per category**, so 5 × 8 = 40 per run |
 | `SCRAPE_INTERVAL_HOURS` | `6` | the Celery Beat schedule |
@@ -220,7 +237,7 @@ pytest -q
 ruff check .
 ```
 
-185 tests. The database tests need Postgres because the code relies on JSONB,
+219 tests. The database tests need Postgres because the code relies on JSONB,
 ARRAY and `DISTINCT ON`, none of which SQLite provides. Without a database they
 skip, so the pure unit tests still run anywhere — except in CI, where
 `REQUIRE_TEST_DB=1` turns that skip into a failure. A green CI run that quietly
@@ -283,6 +300,7 @@ Before exposing it publicly:
 app/
   api/
     routers/       HTTP endpoints, one module per resource
+    dependencies/  FastAPI dependencies, e.g. auth.py: JWT → User
     routes.py      collects the routers into one api_router
   services/        business logic
   repositories/    database access
@@ -294,13 +312,12 @@ app/
     tasks/         the tasks themselves
   utils/
     keywords.py    keyword extraction (pure, no I/O)
-    deps.py        FastAPI dependency: JWT → User
   core/            config, logging, security, exceptions
   seed_data/       bundled Amazon snapshot for the fallback
 alembic/           migrations
 frontend/          Vue 3 SPA served by nginx
 scripts/           smoke.sh, check_seed.py
-tests/             185 tests
+tests/             219 tests
 ```
 
 ## Stack

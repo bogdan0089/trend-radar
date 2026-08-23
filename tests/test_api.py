@@ -106,6 +106,25 @@ class TestAuthorizationWall:
 
         assert client.get("/api/products", headers=auth_headers).status_code == 401
 
+    def test_a_rejection_names_the_scheme(self, client):
+        """RFC 9110: a 401 must say which scheme to authenticate with.
+
+        The dependency raises a domain error now instead of building its own
+        HTTPException, so the header has to come from the exception handler.
+        """
+        response = client.get("/api/products")
+
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+
+    @pytest.mark.parametrize(("method", "path"), PROTECTED_ENDPOINTS)
+    def test_every_rejection_reads_the_same(self, client, method, path):
+        """No token, a broken token and a deleted user answer identically, so
+        the response cannot be used to probe which part failed."""
+        no_token = getattr(client, method)(path)
+        broken = getattr(client, method)(path, headers={"Authorization": "Bearer nope"})
+
+        assert no_token.json()["detail"] == broken.json()["detail"]
+
 
 class TestProducts:
     def test_empty_list_has_the_pagination_envelope(self, client, auth_headers):
@@ -280,6 +299,31 @@ class TestPastProductsCsvImport:
         )
 
         assert response.status_code == 422
+
+    def test_an_oversized_cell_is_a_422_not_a_crash(self, client, auth_headers):
+        """A cell past the csv module's 128 KB field limit raises csv.Error,
+        which is neither a ValueError nor a DomainError. It used to leave the
+        endpoint as a 500 on a file the user could actually fix, and the whole
+        upload is well under the 5 MB cap."""
+        oversized = "x" * 200_000
+        response = client.post(
+            "/api/sales-boost/import-csv",
+            headers=auth_headers,
+            files=csv_upload(f'title,category\r\n"{oversized}",Electronics\r\n'),
+        )
+
+        assert response.status_code == 422
+        assert "CSV" in response.json()["detail"]
+
+    def test_an_unterminated_quote_is_a_422_not_a_crash(self, client, auth_headers):
+        response = client.post(
+            "/api/sales-boost/import-csv",
+            headers=auth_headers,
+            files=csv_upload('title,category\r\n"Yoga Mat,Sports\r\n'),
+        )
+
+        assert response.status_code in (200, 422)
+        assert response.status_code != 500
 
     def test_excel_bom_does_not_break_the_header(self, client, auth_headers):
         """Excel prepends a BOM, which would otherwise hide the title column."""
