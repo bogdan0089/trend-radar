@@ -48,6 +48,45 @@ class TestCategoryMatch:
         result = calculate_boost(title="Dumbbell Rack", category="SPORTS", past=[yoga_mat])
         assert result.score == CATEGORY_MATCH_POINTS
 
+    @pytest.mark.parametrize(
+        ("past_category", "product_category"),
+        [
+            ("Art", "Smart Home"),
+            ("Pet", "Carpet Care"),
+            ("Tea", "Steam Cleaning"),
+            ("Toy", "Toyota Accessories"),
+        ],
+    )
+    def test_a_category_hidden_inside_a_word_does_not_match(
+        self, past_category, product_category
+    ):
+        """Raw substring matching handed out the points for nothing: "art" sits
+        inside "smart home" and "pet" inside "carpet care"."""
+        entry = PastEntry(title="Something", category=past_category, keywords=[])
+
+        result = calculate_boost(title="Thing", category=product_category, past=[entry])
+
+        assert result.matched_category is None
+        assert result.score == 0
+
+    @pytest.mark.parametrize(
+        ("past_category", "product_category"),
+        [
+            ("Electronics", "Best Sellers in Electronics"),
+            ("Home & Kitchen", "Best Sellers in Home & Kitchen"),
+            ("Toys", "Toys and Games"),
+        ],
+    )
+    def test_a_category_that_is_really_contained_still_matches(
+        self, past_category, product_category
+    ):
+        """The reason containment exists: Amazon prefixes its page titles."""
+        entry = PastEntry(title="Something", category=past_category, keywords=[])
+
+        result = calculate_boost(title="Thing", category=product_category, past=[entry])
+
+        assert result.score == CATEGORY_MATCH_POINTS
+
 
 class TestKeywordMatch:
     def test_single_keyword(self, yoga_mat):
