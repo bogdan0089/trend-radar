@@ -82,11 +82,18 @@ def calculate_boost(*, title: str, category: str, past: list[PastEntry]) -> Boos
 
 
 def _category_matches(left: str, right: str) -> bool:
-    """Match categories loosely: containment counts, not only equality."""
-    a, b = left.strip().lower(), right.strip().lower()
+    """Match categories by whole words, not by raw substring.
+
+    One category legitimately contains the other: Amazon labels a page "Best
+    Sellers in Electronics" while our history stores "Electronics". Comparing
+    the raw strings did that, but it also matched "Art" inside "Smart Home",
+    "Pet" inside "Carpet Care" and "Tea" inside "Steam Cleaning", handing out
+    the category points for nothing.
+    """
+    a, b = set(tokenize(left)), set(tokenize(right))
     if not a or not b:
         return False
-    return a == b or a in b or b in a
+    return a <= b or b <= a
 
 
 class BoostService:
