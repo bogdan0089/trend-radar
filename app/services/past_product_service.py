@@ -66,40 +66,51 @@ class PastProductService:
             raise ValidationError("The file is larger than 5 MB")
 
         reader = csv.DictReader(io.StringIO(self._decode(raw)))
-        if not reader.fieldnames:
+        try:
+            fieldnames = reader.fieldnames
+        except csv.Error as exc:
+            raise ValidationError(f"The header row could not be read: {exc}") from exc
+        if not fieldnames:
             raise ValidationError("The file has no header row")
 
-        columns = self._map_columns(reader.fieldnames)
+        columns = self._map_columns(fieldnames)
         if "title" not in columns or "category" not in columns:
             raise ValidationError(
                 "The CSV must contain 'title' and 'category' columns. "
-                f"Found: {', '.join(reader.fieldnames)}"
+                f"Found: {', '.join(fieldnames)}"
             )
 
         imported = skipped = 0
         errors: list[str] = []
 
-        for line_number, raw_row in enumerate(reader, start=2):
-            try:
-                row = self._parse_row(raw_row, columns)
-            except ValueError as exc:
-                skipped += 1
-                self._collect_error(errors, f"row {line_number}: {exc}")
-                continue
+        # csv.Error is raised by the reader itself, not by a row: an unterminated
+        # quote, or a cell past the module's 128 KB field limit. It is neither a
+        # ValueError nor a DomainError, so it used to leave the endpoint as a 500
+        # on a file the user could actually fix.
+        try:
+            for line_number, raw_row in enumerate(reader, start=2):
+                try:
+                    row = self._parse_row(raw_row, columns)
+                except ValueError as exc:
+                    skipped += 1
+                    self._collect_error(errors, f"row {line_number}: {exc}")
+                    continue
 
-            if self.past_products.exists(title=row.title, category=row.category):
-                skipped += 1
-                self._collect_error(errors, f"row {line_number}: duplicate '{row.title}'")
-                continue
+                if self.past_products.exists(title=row.title, category=row.category):
+                    skipped += 1
+                    self._collect_error(errors, f"row {line_number}: duplicate '{row.title}'")
+                    continue
 
-            self.past_products.create(
-                title=row.title,
-                category=row.category,
-                keywords=row.keywords,
-                notes=row.notes,
-                source="csv",
-            )
-            imported += 1
+                self.past_products.create(
+                    title=row.title,
+                    category=row.category,
+                    keywords=row.keywords,
+                    notes=row.notes,
+                    source="csv",
+                )
+                imported += 1
+        except csv.Error as exc:
+            raise ValidationError(f"The file could not be read as CSV: {exc}") from exc
 
         self.db.commit()
         logger.info("Sales Boost: CSV import, added %d, skipped %d", imported, skipped)
