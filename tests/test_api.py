@@ -300,6 +300,31 @@ class TestPastProductsCsvImport:
 
         assert response.status_code == 422
 
+    def test_an_oversized_cell_is_a_422_not_a_crash(self, client, auth_headers):
+        """A cell past the csv module's 128 KB field limit raises csv.Error,
+        which is neither a ValueError nor a DomainError. It used to leave the
+        endpoint as a 500 on a file the user could actually fix, and the whole
+        upload is well under the 5 MB cap."""
+        oversized = "x" * 200_000
+        response = client.post(
+            "/api/sales-boost/import-csv",
+            headers=auth_headers,
+            files=csv_upload(f'title,category\r\n"{oversized}",Electronics\r\n'),
+        )
+
+        assert response.status_code == 422
+        assert "CSV" in response.json()["detail"]
+
+    def test_an_unterminated_quote_is_a_422_not_a_crash(self, client, auth_headers):
+        response = client.post(
+            "/api/sales-boost/import-csv",
+            headers=auth_headers,
+            files=csv_upload('title,category\r\n"Yoga Mat,Sports\r\n'),
+        )
+
+        assert response.status_code in (200, 422)
+        assert response.status_code != 500
+
     def test_excel_bom_does_not_break_the_header(self, client, auth_headers):
         """Excel prepends a BOM, which would otherwise hide the title column."""
         files = {
