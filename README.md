@@ -198,6 +198,15 @@ wrong key or an unknown model is not retried, because those never pass. If the
 quota is genuinely exhausted, each product falls to the formula and the log says
 which one and why — the run still completes and every product keeps a score.
 
+**Giving up on a dead provider.** An exhausted quota answers the same way for
+every remaining product, and each of those answers still costs a call plus its
+two retries — about seven seconds of waiting per product, spent to learn
+nothing. After `SCORING_FAILURE_THRESHOLD` failures in a row (3 by default) the
+provider is treated as down for the rest of the run: the remaining products go
+straight to the formula and their reasoning says so. A single failure among
+successes does not count — the streak resets on the next good answer, so one
+timeout never disables scoring for a whole run.
+
 ---
 
 ## Configuration
@@ -210,6 +219,7 @@ whole stack. The settings worth knowing:
 | `LLM_PROVIDER` | `none` | `none` = deterministic formula, no key required |
 | `LLM_API_KEY` | empty | provider key; empty also falls back to the formula |
 | `SCORING_BUDGET_SECONDS` | `900` | how long one run may spend asking the LLM; after that the rest is scored by the formula |
+| `SCORING_FAILURE_THRESHOLD` | `3` | failures in a row before the provider is treated as down for the rest of the run |
 | `AMAZON_CATEGORY_URLS` | 5 category pages | comma separated |
 | `SCRAPE_MAX_PRODUCTS` | `8` | **per category**, so 5 × 8 = 40 per run |
 | `SCRAPE_INTERVAL_HOURS` | `6` | the Celery Beat schedule |
@@ -237,7 +247,7 @@ pytest -q
 ruff check .
 ```
 
-219 tests. The database tests need Postgres because the code relies on JSONB,
+231 tests. The database tests need Postgres because the code relies on JSONB,
 ARRAY and `DISTINCT ON`, none of which SQLite provides. Without a database they
 skip, so the pure unit tests still run anywhere — except in CI, where
 `REQUIRE_TEST_DB=1` turns that skip into a failure. A green CI run that quietly
@@ -317,7 +327,7 @@ app/
 alembic/           migrations
 frontend/          Vue 3 SPA served by nginx
 scripts/           smoke.sh, check_seed.py
-tests/             219 tests
+tests/             231 tests
 ```
 
 ## Stack

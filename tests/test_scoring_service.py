@@ -97,6 +97,57 @@ class TestProviderSelection:
             assert set(score.breakdown) == {"rating", "reviews", "trend", "boost"}
 
 
+class TestGivingUpOnTheProvider:
+    """An exhausted quota answers the same way for every remaining product.
+
+    Each of those answers costs a call plus its retries, so after enough
+    failures in a row the provider is treated as down for the rest of the run.
+    """
+
+    def test_repeated_failures_stop_the_calls(self, db_session, products):
+        llm = FailingLLM()
+
+        outcome = ScoringService(
+            db_session, llm=llm, failure_threshold=2
+        ).score_products(products)
+
+        assert llm.calls == 2
+        assert outcome.after_giving_up == 1
+        assert (outcome.created, outcome.by_fallback) == (3, 3)
+
+    def test_the_reasoning_says_the_provider_was_skipped(self, db_session, products):
+        ScoringService(db_session, llm=FailingLLM(), failure_threshold=1).score_products(
+            products
+        )
+
+        skipped = [
+            score
+            for score in stored_scores(db_session)
+            if "failed on several products in a row" in score.reasoning
+        ]
+        assert len(skipped) == 2
+
+    def test_a_success_resets_the_streak(self, db_session, products):
+        """One bad answer among good ones must not disable the provider."""
+
+        class FlakyLLM(StubLLM):
+            def complete(self, *, system: str, prompt: str) -> str:
+                self.calls += 1
+                if self.calls == 1:
+                    raise ExternalServiceError("LLM responded 503")
+                return self.reply
+
+        llm = FlakyLLM()
+
+        outcome = ScoringService(
+            db_session, llm=llm, failure_threshold=2
+        ).score_products(products)
+
+        assert llm.calls == 3
+        assert outcome.after_giving_up == 0
+        assert (outcome.by_llm, outcome.by_fallback) == (2, 1)
+
+
 class TestTimeBudget:
     """40 products scored one after another can outlive the Celery soft limit.
 

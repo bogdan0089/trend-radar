@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_timeout_seconds: int = 30
     scoring_budget_seconds: int = 900
+    scoring_failure_threshold: int = 3
 
     amazon_category_urls: str = (
         "https://www.amazon.com/Best-Sellers-Electronics/zgbs/electronics,"
