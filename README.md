@@ -247,7 +247,7 @@ pytest -q
 ruff check .
 ```
 
-231 tests. The database tests need Postgres because the code relies on JSONB,
+235 tests. The database tests need Postgres because the code relies on JSONB,
 ARRAY and `DISTINCT ON`, none of which SQLite provides. Without a database they
 skip, so the pure unit tests still run anywhere — except in CI, where
 `REQUIRE_TEST_DB=1` turns that skip into a failure. A green CI run that quietly
@@ -295,12 +295,14 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 
 Before exposing it publicly:
 
-1. `SECRET_KEY` — generate one, `openssl rand -hex 32`. The default is a known
-   string; anybody could mint their own tokens.
-2. `ADMIN_PASSWORD` — change it.
-3. `CORS_ORIGINS` — set to the real domain.
-4. Put a TLS-terminating proxy in front of the frontend container.
-5. Give the host a real Amazon-reachable IP, or set `SCRAPE_PROXY`.
+1. `ENVIRONMENT=production` — with it set, the application refuses to start on
+   the published `SECRET_KEY` or `ADMIN_PASSWORD` instead of trusting whoever
+   deploys it to have read this list.
+2. `SECRET_KEY` — generate one, `openssl rand -hex 32`.
+3. `ADMIN_PASSWORD` — change it.
+4. `CORS_ORIGINS` — set to the real domain.
+5. Put a TLS-terminating proxy in front of the frontend container.
+6. Give the host a real Amazon-reachable IP, or set `SCRAPE_PROXY`.
 
 ---
 
@@ -327,7 +329,7 @@ app/
 alembic/           migrations
 frontend/          Vue 3 SPA served by nginx
 scripts/           smoke.sh, check_seed.py
-tests/             231 tests
+tests/             235 tests
 ```
 
 ## Stack
