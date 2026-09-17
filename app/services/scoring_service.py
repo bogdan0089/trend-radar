@@ -38,6 +38,14 @@ _BUDGET_NOTE = (
     "budget, so the deterministic formula was used instead."
 )
 
+# An exhausted quota or a dead provider answers the same way for every remaining
+# product, and each of those answers costs a call plus its retries. After enough
+# failures in a row the provider is treated as down for the rest of the run.
+_GIVE_UP_NOTE = (
+    "The LLM was not asked for this product: the provider had failed on several "
+    "products in a row, so the deterministic formula was used instead."
+)
+
 
 @dataclass
 class ScoringOutcome:
@@ -45,6 +53,7 @@ class ScoringOutcome:
     by_llm: int = 0
     by_fallback: int = 0
     out_of_budget: int = 0
+    after_giving_up: int = 0
 
 
 class ScoringService:
@@ -55,6 +64,7 @@ class ScoringService:
         *,
         use_llm: bool = True,
         budget_seconds: float | None = None,
+        failure_threshold: int | None = None,
     ) -> None:
         """`use_llm=False` forces the formula even when a key is configured."""
         self.db = db
@@ -65,6 +75,11 @@ class ScoringService:
         self.llm = llm if llm is not None else (build_client() if use_llm else None)
         self.budget_seconds = (
             settings.scoring_budget_seconds if budget_seconds is None else budget_seconds
+        )
+        self.failure_threshold = (
+            settings.scoring_failure_threshold
+            if failure_threshold is None
+            else failure_threshold
         )
 
     def score_products(self, product_ids: list[int]) -> ScoringOutcome:
@@ -77,13 +92,15 @@ class ScoringService:
 
         deadline = time.monotonic() + self.budget_seconds
         outcome = ScoringOutcome()
+        failures_in_a_row = 0
+        gave_up = False
 
         for product in products:
             delta, unreliable = self._read_trend(trends.get(product.id))
             boost = self.boost.calculate(title=product.title, category=product.category)
 
-            allow_llm = time.monotonic() < deadline
-            if not allow_llm and self.llm is not None:
+            in_budget = time.monotonic() < deadline
+            if not in_budget and not gave_up and self.llm is not None:
                 outcome.out_of_budget += 1
                 if outcome.out_of_budget == 1:
                     logger.warning(
@@ -91,10 +108,23 @@ class ScoringService:
                         "are scored by the formula",
                         self.budget_seconds,
                     )
+            if gave_up and self.llm is not None:
+                outcome.after_giving_up += 1
 
-            result, provider = self._evaluate(
-                product, delta, unreliable, boost, allow_llm=allow_llm
+            allow_llm = in_budget and not gave_up
+            result, provider, llm_failed = self._evaluate(
+                product, delta, unreliable, boost, allow_llm=allow_llm, gave_up=gave_up
             )
+
+            if allow_llm and self.llm is not None:
+                failures_in_a_row = failures_in_a_row + 1 if llm_failed else 0
+                if failures_in_a_row >= self.failure_threshold:
+                    gave_up = True
+                    logger.warning(
+                        "Scoring: the LLM failed %d times in a row, the remaining "
+                        "products are scored by the formula without calling it",
+                        failures_in_a_row,
+                    )
             self.scores.create(
                 product_id=product.id,
                 score=result.score,
@@ -112,11 +142,13 @@ class ScoringService:
 
         self.db.commit()
         logger.info(
-            "Scoring: %d ratings (LLM %d, formula %d, of which %d out of budget)",
+            "Scoring: %d ratings (LLM %d, formula %d, of which %d out of budget "
+            "and %d after giving up on the provider)",
             outcome.created,
             outcome.by_llm,
             outcome.by_fallback,
             outcome.out_of_budget,
+            outcome.after_giving_up,
         )
         return outcome
 
@@ -139,7 +171,9 @@ class ScoringService:
         boost: BoostResult,
         *,
         allow_llm: bool = True,
-    ) -> tuple[ScoreResult, str]:
+        gave_up: bool = False,
+    ) -> tuple[ScoreResult, str, bool]:
+        """The score, which branch produced it, and whether an LLM call failed."""
         fallback = calculate_fallback_score(
             title=product.title,
             rating=product.rating,
@@ -151,10 +185,11 @@ class ScoringService:
         )
 
         if self.llm is None:
-            return fallback, "fallback"
+            return fallback, "fallback", False
 
         if not allow_llm:
-            return self._with_note(fallback, _BUDGET_NOTE), "fallback"
+            note = _GIVE_UP_NOTE if gave_up else _BUDGET_NOTE
+            return self._with_note(fallback, note), "fallback", False
 
         try:
             raw = self.llm.complete(
@@ -168,7 +203,7 @@ class ScoringService:
                 product.asin,
                 exc,
             )
-            return fallback, "fallback"
+            return fallback, "fallback", True
 
         return (
             ScoreResult(
@@ -177,6 +212,7 @@ class ScoringService:
                 breakdown=fallback.breakdown,
             ),
             self.llm.provider,
+            False,
         )
 
     @staticmethod
