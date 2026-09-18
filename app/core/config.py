@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = DEV_ADMIN_PASSWORD
 
+    # Anyone may register. Visitors read everything and may start a scrape, but
+    # the server is shared, so a new run waits this long after the previous one.
+    visitor_run_cooldown_minutes: int = 15
+
     llm_provider: Literal["anthropic", "openai", "gemini", "grok", "none"] = "none"
     llm_api_key: str = ""
     llm_model: str = ""

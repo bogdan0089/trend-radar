@@ -1,26 +1,31 @@
 <script setup>
-import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
+import { ApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
-const route = useRoute()
 const router = useRouter()
 
 const username = ref('')
 const password = ref('')
 const error = ref('')
+const taken = ref(false)
 const busy = ref(false)
+
+const passwordTooShort = computed(() => password.value.length > 0 && password.value.length < 8)
 
 async function submit() {
   error.value = ''
+  taken.value = false
   busy.value = true
   try {
-    await auth.login(username.value, password.value)
-    await router.push(route.query.redirect || { name: 'dashboard' })
+    await auth.register(username.value, password.value)
+    await router.push({ name: 'dashboard' })
   } catch (exception) {
-    error.value = exception.message
+    taken.value = exception instanceof ApiError && exception.status === 409
+    error.value = taken.value ? '' : exception.message
   } finally {
     busy.value = false
   }
@@ -28,11 +33,15 @@ async function submit() {
 </script>
 
 <template>
-  <div class="login">
+  <div class="register">
     <div class="card">
-      <h1>Trend Radar</h1>
-      <p class="muted subtitle">Sign in to open the dashboard.</p>
+      <h1>Create an account</h1>
+      <p class="muted subtitle">Look around the dashboard and start a scrape yourself.</p>
 
+      <p v-if="taken" class="alert error">
+        This username is taken.
+        <RouterLink :to="{ name: 'login' }">Sign in instead?</RouterLink>
+      </p>
       <p v-if="error" class="alert error">{{ error }}</p>
 
       <form @submit.prevent="submit">
@@ -42,6 +51,10 @@ async function submit() {
             id="username"
             v-model="username"
             autocomplete="username"
+            minlength="3"
+            maxlength="32"
+            pattern="[A-Za-z0-9_.\-]+"
+            title="Letters, digits, dot, dash and underscore"
             required
             autofocus
           />
@@ -53,19 +66,20 @@ async function submit() {
             id="password"
             v-model="password"
             type="password"
-            autocomplete="current-password"
+            autocomplete="new-password"
+            minlength="8"
             required
           />
+          <p v-if="passwordTooShort" class="muted field-hint">At least 8 characters.</p>
         </div>
 
         <button type="submit" :disabled="busy" class="submit">
-          {{ busy ? 'Signing in…' : 'Sign in' }}
+          {{ busy ? 'Creating…' : 'Create account' }}
         </button>
       </form>
 
       <p class="muted hint">
-        No account yet? <RouterLink :to="{ name: 'register' }">Create one</RouterLink> — it takes
-        ten seconds.
+        Already registered? <RouterLink :to="{ name: 'login' }">Sign in</RouterLink>
       </p>
       <p class="muted hint back"><RouterLink :to="{ name: 'home' }">← About Trend Radar</RouterLink></p>
     </div>
@@ -73,7 +87,7 @@ async function submit() {
 </template>
 
 <style scoped>
-.login {
+.register {
   width: 100%;
   max-width: 380px;
 }
@@ -86,6 +100,11 @@ async function submit() {
 .submit {
   width: 100%;
   margin-top: 4px;
+}
+
+.field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
 }
 
 .hint {
