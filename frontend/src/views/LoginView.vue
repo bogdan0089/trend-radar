@@ -37,7 +37,7 @@ async function submit() {
 
       <form @submit.prevent="submit">
         <div class="field">
-          <label for="username">Username</label>
+          <label for="username">Username or email</label>
           <input
             id="username"
             v-model="username"
