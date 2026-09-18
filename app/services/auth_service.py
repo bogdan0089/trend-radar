@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import InvalidCredentialsError
+from app.core.exceptions import AlreadyExistsError, InvalidCredentialsError
 from app.core.logging import get_logger
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
@@ -29,16 +29,30 @@ class AuthService:
         logger.info("Successful login username=%s", username)
         return create_access_token(user.username)
 
+    def register(self, username: str, password: str) -> str:
+        """Create a visitor account and return a token, so sign-up also signs in."""
+        if self.users.get_by_username(username) is not None:
+            raise AlreadyExistsError("Account", username)
+
+        self.users.create(username=username, password_hash=hash_password(password))
+        self.db.commit()
+        logger.info("Registered username=%s", username)
+        return create_access_token(username)
+
     def get_by_username(self, username: str) -> User | None:
         return self.users.get_by_username(username)
 
     def ensure_admin(self, username: str, password: str) -> bool:
         """Create the admin user if missing. Returns True when it was created."""
+        return self.ensure_user(username, password)
+
+    def ensure_user(self, username: str, password: str) -> bool:
+        """Create a user if missing. Returns True when it was created."""
         if self.users.get_by_username(username) is not None:
-            logger.info("Admin '%s' already exists, skipping", username)
+            logger.info("User '%s' already exists, skipping", username)
             return False
 
         self.users.create(username=username, password_hash=hash_password(password))
         self.db.commit()
-        logger.info("Created admin '%s'", username)
+        logger.info("Created user '%s'", username)
         return True

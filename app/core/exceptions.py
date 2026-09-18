@@ -48,6 +48,16 @@ class ValidationError(DomainError):
         super().__init__(message, http_status_code=422)
 
 
+class ForbiddenError(DomainError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, http_status_code=403)
+
+
+class TooManyRequestsError(DomainError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, http_status_code=429)
+
+
 class ScrapingError(DomainError):
     """Captcha, block, timeout, or layout change from the scraper."""
 

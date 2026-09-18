@@ -28,7 +28,12 @@ afterwards.
 | Swagger | http://localhost:8011/docs |
 | Health | http://localhost:8011/api/health |
 
-**Test account: `admin` / `admin123`**
+**Accounts.** Anyone can register from the landing page. A registered visitor sees
+the whole dashboard and may start a scrape, but a new run waits
+`VISITOR_RUN_COOLDOWN_MINUTES` (15 by default) after the previous one — the server
+is shared, and each run drives a real browser. The sales history is shared data, so
+only the admin edits it. Locally the admin is `admin` / `admin123`; in production
+`ENVIRONMENT=production` refuses to start until both are changed.
 
 Host ports are deliberately non-standard (3011 / 8011 / 5442 / 6390) so the
 stack does not clash with anything else running locally. Change them in `.env`.
@@ -226,6 +231,7 @@ whole stack. The settings worth knowing:
 | `SCRAPE_PROXY` | empty | optional, for IP ranges Amazon blocks |
 | `SCRAPE_SNAPSHOT_FALLBACK` | `true` | see below |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / `admin123` | seeded on startup |
+| `VISITOR_RUN_COOLDOWN_MINUTES` | `15` | how long a visitor's run waits after the previous one; the admin is not limited |
 
 **Why category pages and not the root `/Best-Sellers/zgbs`:** on the root every
 product is labelled "Amazon Best Sellers", which would make the boost by

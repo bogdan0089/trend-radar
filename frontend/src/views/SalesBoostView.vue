@@ -3,7 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 
 import { api } from '@/api/client'
 import { useApiError } from '@/composables/useApiError'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const toMessage = useApiError()
 
 const PAGE_SIZE = 100
@@ -116,7 +118,12 @@ onMounted(load)
     <p v-if="error" class="alert error">{{ error }}</p>
     <p v-if="notice" class="alert success">{{ notice }}</p>
 
-    <div class="forms">
+    <p v-if="!auth.isAdmin" class="alert">
+      The sales history is shared by everyone who signs in, so only the admin edits it.
+      You can still see how it lifts the scores on the dashboard.
+    </p>
+
+    <div v-if="auth.isAdmin" class="forms">
       <div class="card">
         <h2>Add manually</h2>
 

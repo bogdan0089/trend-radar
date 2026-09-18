@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_admin, get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.sales_boost import (
@@ -34,7 +34,7 @@ def list_past_products(
 def create_past_product(
     payload: PastProductCreate,
     session: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_admin),
 ) -> PastProductRead:
     """Manual entry from the Sales Boost form."""
     return PastProductRead.model_validate(PastProductService(session).create(payload))
@@ -44,7 +44,7 @@ def create_past_product(
 def import_csv(
     file: UploadFile = File(...),
     session: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_admin),
 ) -> CsvImportReport:
     """CSV import; a partial import is reported, not raised."""
     return PastProductService(session).import_csv(file.file.read())

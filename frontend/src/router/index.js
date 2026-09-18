@@ -4,13 +4,25 @@ import { useAuthStore } from '@/stores/auth'
 
 const routes = [
   {
-    path: '/login',
-    name: 'login',
-    component: () => import('@/views/LoginView.vue'),
+    path: '/',
+    name: 'home',
+    component: () => import('@/views/LandingView.vue'),
     meta: { public: true },
   },
   {
-    path: '/',
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { public: true, guestOnly: true },
+  },
+  {
+    path: '/register',
+    name: 'register',
+    component: () => import('@/views/RegisterView.vue'),
+    meta: { public: true, guestOnly: true },
+  },
+  {
+    path: '/dashboard',
     name: 'dashboard',
     component: () => import('@/views/DashboardView.vue'),
   },
@@ -32,7 +44,7 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
   if (to.meta.public) {
-    return auth.isAuthenticated && to.name === 'login' ? { name: 'dashboard' } : true
+    return auth.isAuthenticated && to.meta.guestOnly ? { name: 'dashboard' } : true
   }
 
   if (!auth.isAuthenticated) {

@@ -8,7 +8,11 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const showChrome = computed(() => route.name !== 'login')
+const AUTH_PAGES = ['login', 'register']
+
+// The landing page draws its own header; the sign-in forms are centred on their own.
+const showChrome = computed(() => route.name !== 'home' && !AUTH_PAGES.includes(route.name))
+const centered = computed(() => AUTH_PAGES.includes(route.name))
 
 function logout() {
   auth.logout()
@@ -19,10 +23,10 @@ function logout() {
 <template>
   <div class="shell">
     <header v-if="showChrome" class="topbar">
-      <div class="brand">
+      <RouterLink :to="{ name: 'home' }" class="brand">
         <span class="dot" aria-hidden="true"></span>
         <span>Trend Radar</span>
-      </div>
+      </RouterLink>
 
       <nav>
         <RouterLink :to="{ name: 'dashboard' }">Dashboard</RouterLink>
@@ -35,7 +39,7 @@ function logout() {
       </div>
     </header>
 
-    <main :class="{ centered: !showChrome }">
+    <main :class="{ centered }">
       <RouterView />
     </main>
   </div>
@@ -59,6 +63,8 @@ function logout() {
 }
 
 .brand {
+  color: var(--text);
+  text-decoration: none;
   display: flex;
   align-items: center;
   gap: 9px;
