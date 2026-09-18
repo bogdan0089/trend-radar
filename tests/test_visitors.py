@@ -44,6 +44,11 @@ class TestRegistration:
         assert me.json()["username"] == "visitor1"
         assert me.json()["is_admin"] is False
 
+    def test_an_email_is_a_valid_username(self, client):
+        response = register(client, username="jane.doe+radar@example.com")
+
+        assert response.status_code == 201
+
     def test_a_taken_username_is_a_409(self, client):
         register(client)
 

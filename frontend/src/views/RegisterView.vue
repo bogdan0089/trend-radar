@@ -46,15 +46,15 @@ async function submit() {
 
       <form @submit.prevent="submit">
         <div class="field">
-          <label for="username">Username</label>
+          <label for="username">Username or email</label>
           <input
             id="username"
             v-model="username"
             autocomplete="username"
             minlength="3"
-            maxlength="32"
-            pattern="[A-Za-z0-9_.\-]+"
-            title="Letters, digits, dot, dash and underscore"
+            maxlength="64"
+            pattern="[A-Za-z0-9_.@+\-]+"
+            title="Letters, digits and . _ - @ +, without spaces"
             required
             autofocus
           />
