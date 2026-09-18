@@ -7,12 +7,20 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref(getToken())
   const user = ref(null)
   const isAuthenticated = computed(() => Boolean(token.value))
+  const isAdmin = computed(() => Boolean(user.value?.is_admin))
 
-  async function login(username, password) {
-    const response = await api.login(username, password)
+  async function signIn(response) {
     token.value = response.access_token
     setToken(response.access_token)
     user.value = await api.me()
+  }
+
+  async function login(username, password) {
+    await signIn(await api.login(username, password))
+  }
+
+  async function register(username, password) {
+    await signIn(await api.register(username, password))
   }
 
   function logout() {
@@ -34,5 +42,5 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { token, user, isAuthenticated, login, logout, restore }
+  return { token, user, isAuthenticated, isAdmin, login, register, logout, restore }
 })

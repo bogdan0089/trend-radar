@@ -77,6 +77,9 @@ export const api = {
   login: (username, password) =>
     request('/api/auth/login', { method: 'POST', body: { username, password } }),
 
+  register: (username, password) =>
+    request('/api/auth/register', { method: 'POST', body: { username, password } }),
+
   me: () => request('/api/auth/me'),
 
   health: () => request('/api/health'),

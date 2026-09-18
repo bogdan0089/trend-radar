@@ -4,7 +4,8 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import InvalidCredentialsError
+from app.core.config import settings
+from app.core.exceptions import ForbiddenError, InvalidCredentialsError
 from app.core.logging import get_logger
 from app.core.security import decode_access_token
 from app.db.session import get_db
@@ -38,4 +39,16 @@ def get_current_user(
         logger.warning("Token is valid but user '%s' is missing or disabled", username)
         raise InvalidCredentialsError("user missing or disabled")
 
+    return user
+
+
+def is_admin(user: User) -> bool:
+    """The account created from ADMIN_USERNAME; everyone else registered themselves."""
+    return user.username == settings.admin_username
+
+
+def get_admin(user: User = Depends(get_current_user)) -> User:
+    """Shared data such as the sales history is changed by the admin only."""
+    if not is_admin(user):
+        raise ForbiddenError("Only the admin can change the sales history")
     return user

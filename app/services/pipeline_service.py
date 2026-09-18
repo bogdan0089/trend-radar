@@ -2,10 +2,16 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from math import ceil
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import DomainError, ExternalServiceError, NotFoundError
+from app.core.exceptions import (
+    DomainError,
+    ExternalServiceError,
+    NotFoundError,
+    TooManyRequestsError,
+)
 from app.core.logging import get_logger
 from app.models.scrape_run import ScrapeRun
 from app.repositories.scrape_run import ScrapeRunRepository
@@ -46,11 +52,18 @@ class PipelineService:
         run.celery_task_id = task_id
         self.db.commit()
 
-    def start_manual_run(self) -> ScrapeRun:
-        """Queue a run and return at once; an already active run is reused."""
+    def start_manual_run(self, cooldown: timedelta | None = None) -> ScrapeRun:
+        """Queue a run and return at once; an already active run is reused.
+
+        With a cooldown, a new run is refused until that long after the last one
+        was created, whoever started it.
+        """
         if (active := self.active_run()) is not None:
             logger.info("Pipeline: run %d still active, not creating a new one", active.id)
             return active
+
+        if cooldown is not None:
+            self._check_cooldown(cooldown)
 
         run = self.create_run(trigger="manual")
 
@@ -68,6 +81,20 @@ class PipelineService:
 
         self.attach_task_id(run, async_result.id)
         return run
+
+    def _check_cooldown(self, cooldown: timedelta) -> None:
+        last = self.runs.get_last()
+        if last is None:
+            return
+
+        ready_at = last.created_at + cooldown
+        now = datetime.now(UTC)
+        if now < ready_at:
+            minutes = max(1, ceil((ready_at - now).total_seconds() / 60))
+            raise TooManyRequestsError(
+                f"A new run can start {int(cooldown.total_seconds() // 60)} minutes after "
+                f"the previous one. Try again in {minutes} min."
+            )
 
     def active_run(self) -> ScrapeRun | None:
         """The run still in flight, if any. A run left behind by a dead worker is
