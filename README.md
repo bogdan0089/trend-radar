@@ -276,10 +276,17 @@ pull request:
 | **Migrations and seed** | `alembic upgrade head` on an empty database, `alembic check` for drift between models and migrations, a `downgrade base` → `upgrade head` round trip, then the seed run **twice** and verified by `scripts/check_seed.py` |
 | **Frontend build** | `npm ci && npm run build` |
 | **Docker Compose smoke test** | builds the real stack, waits for health, runs `scripts/smoke.sh` |
+| **Deploy** | on a merge to `main` only, after the smoke test: SSH to the host, `git pull --ff-only`, restart with the production overlay |
 
 The migration job is the one that catches the expensive mistakes: a model
 changed without a migration, a downgrade that was never written, or a seed that
 duplicates rows on the second container start.
+
+Deploy needs three repository secrets: `EC2_HOST`, `EC2_USER` and `EC2_SSH_KEY`.
+The key is a deploy key of its own, not a personal one, so it can be revoked on
+the host without touching anyone's access. Runs on `main` are never cancelled by a
+newer push, because stopping one halfway through a deploy would leave the host
+with new code and old containers.
 
 ---
 

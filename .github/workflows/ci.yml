@@ -6,10 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A new push supersedes the previous run on the same branch.
+# A new push supersedes the previous run on the same branch -- except on main,
+# where the run may be deploying and stopping it halfway would leave the server
+# with new code and old containers.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   PYTHON_VERSION: '3.12'
@@ -191,3 +193,25 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    # Only a merge to main deploys, and only after the whole stack came up green
+    # in the smoke test above.
+    needs: [stack]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Pull and restart on the server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -e
+            cd /home/ubuntu/trend-radar
+            git pull --ff-only origin main
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
