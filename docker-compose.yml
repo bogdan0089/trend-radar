@@ -10,6 +10,7 @@ x-backend-env: &backend-env
   REDIS_HOST: redis
   REDIS_PORT: 6379
   REDIS_DB: ${REDIS_DB:-0}
+  ENVIRONMENT: ${ENVIRONMENT:-local}
   SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me-in-production}
   ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
   ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
@@ -19,6 +20,7 @@ x-backend-env: &backend-env
   LLM_MODEL: ${LLM_MODEL:-}
   LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
   SCORING_BUDGET_SECONDS: ${SCORING_BUDGET_SECONDS:-900}
+  SCORING_FAILURE_THRESHOLD: ${SCORING_FAILURE_THRESHOLD:-3}
   AMAZON_CATEGORY_URLS: ${AMAZON_CATEGORY_URLS:-https://www.amazon.com/Best-Sellers-Electronics/zgbs/electronics,https://www.amazon.com/Best-Sellers-Home-Kitchen/zgbs/home-garden,https://www.amazon.com/Best-Sellers-Toys-Games/zgbs/toys-and-games,https://www.amazon.com/Best-Sellers-Sports-Outdoors/zgbs/sporting-goods,https://www.amazon.com/Best-Sellers-Beauty/zgbs/beauty}
   SCRAPE_MAX_PRODUCTS: ${SCRAPE_MAX_PRODUCTS:-8}
   SCRAPE_INTERVAL_HOURS: ${SCRAPE_INTERVAL_HOURS:-6}
