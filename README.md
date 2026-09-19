@@ -8,6 +8,12 @@ Trends (also with Playwright), compares each product against our own history of
 past winners, and turns all of that into a **0–100 score with a written
 reasoning**. Everything heavy runs in Celery, so the API never blocks.
 
+**▶ Live:** https://radar.bondanweb.duckdns.org — free sign-up; you can start a scrape yourself.
+
+| Landing | Dashboard |
+|---|---|
+| ![Landing page](docs/screenshots/landing.png) | ![Dashboard](docs/screenshots/dashboard.png) |
+
 ---
 
 ## Quick start
@@ -253,7 +259,7 @@ pytest -q
 ruff check .
 ```
 
-235 tests. The database tests need Postgres because the code relies on JSONB,
+250 tests. The database tests need Postgres because the code relies on JSONB,
 ARRAY and `DISTINCT ON`, none of which SQLite provides. Without a database they
 skip, so the pure unit tests still run anywhere — except in CI, where
 `REQUIRE_TEST_DB=1` turns that skip into a failure. A green CI run that quietly
@@ -314,8 +320,14 @@ Before exposing it publicly:
 2. `SECRET_KEY` — generate one, `openssl rand -hex 32`.
 3. `ADMIN_PASSWORD` — change it.
 4. `CORS_ORIGINS` — set to the real domain.
-5. Put a TLS-terminating proxy in front of the frontend container.
+5. Put a TLS-terminating proxy in front of the frontend container. The overlay
+   publishes the frontend on port 80 by default; behind a proxy that already owns
+   80, bind it to loopback instead — `FRONTEND_EXTERNAL_PORT=127.0.0.1:3011` turns
+   the overlay's `${FRONTEND_EXTERNAL_PORT:-80}:80` into `127.0.0.1:3011:80`.
 6. Give the host a real Amazon-reachable IP, or set `SCRAPE_PROXY`.
+
+The live instance runs exactly this way on AWS EC2 behind Caddy, and deploys
+itself on every merge to `main` — see [CI](#ci).
 
 ---
 
@@ -342,7 +354,7 @@ app/
 alembic/           migrations
 frontend/          Vue 3 SPA served by nginx
 scripts/           smoke.sh, check_seed.py
-tests/             235 tests
+tests/             250 tests
 ```
 
 ## Stack
